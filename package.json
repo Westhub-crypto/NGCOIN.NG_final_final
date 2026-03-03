@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "NGCoin Telegram Mini App with tasks, VIP system, leaderboard, countdown, admin dashboard",
   "main": "server.js",
-  "type": "module",
   "scripts": {
     "start": "node server.js"
   },
