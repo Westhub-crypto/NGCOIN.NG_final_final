@@ -1,14 +1,12 @@
 {
-  "name": "ngcoin-miniapp",
+  "name": "ngcoin-mini-app",
   "version": "1.0.0",
-  "description": "NGCoin + Telegram Mini App with Monetag SDK",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "axios": "^1.7.2",
+    "axios": "^1.6.0",
     "bcrypt": "^5.1.0",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
@@ -16,10 +14,5 @@
     "express-rate-limit": "^6.7.0",
     "multer": "^1.4.5-lts.1",
     "pg": "^8.11.1"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
-  "author": "Godwin Oloja",
-  "license": "MIT"
+  }
 }
