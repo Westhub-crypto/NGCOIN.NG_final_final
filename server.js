@@ -1,5 +1,5 @@
 // ========================================================
-// NGCoin + Telegram Mini App Unified Server.js (Advanced + Monetag)
+// NGCoin + Telegram Mini App Unified Server.js (Advanced + Monetag + Combo)
 // ========================================================
 
 const express = require("express");
@@ -24,8 +24,8 @@ const ADMIN_PASSWORD_BROWSER = "@Westpablo1";
 const LAUNCH_DATE = new Date("2026-12-01T00:00:00");
 const REFERRAL_BONUS = 500;
 const TOTAL_POOL = 10000000;
-const DAILY_BONUS = 100;           // Coins per daily bonus
-const MINING_COOLDOWN = 2000;      // 2 seconds cooldown per tap
+const DAILY_BONUS = 100;
+const MINING_COOLDOWN = 2000; // 2s per tap
 
 // ===================== MIDDLEWARE =====================
 app.use(bodyParser.json());
@@ -72,6 +72,7 @@ const pool = new Pool({
         hourly_taps INT DEFAULT 0,
         hour_timestamp BIGINT DEFAULT 0,
         last_daily_bonus BIGINT DEFAULT 0,
+        max_combo INT DEFAULT 0,
         referral_code TEXT,
         referred_by TEXT,
         referrer_id TEXT,
@@ -111,9 +112,6 @@ const pool = new Pool({
       );
     `);
 
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id);`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);`);
-
     console.log("All tables initialized successfully.");
   } catch (err) {
     console.error("Error initializing tables:", err);
@@ -142,18 +140,6 @@ function generateDeviceHash(req) {
   return crypto.createHash("sha256").update(req.headers["user-agent"] + req.ip).digest("hex");
 }
 
-// ===================== CHANNEL VERIFICATION =====================
-async function verifyChannel(telegram_id) {
-  try {
-    const url = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember`;
-    const response = await axios.post(url, { chat_id: CHANNEL_USERNAME, user_id: telegram_id });
-    const status = response.data.result.status;
-    return status === "member" || status === "administrator" || status === "creator";
-  } catch (err) {
-    return false;
-  }
-}
-
 // ===================== FRAUD ENGINE =====================
 function fraudEngine(user, now) {
   let fraud = user.fraud_score;
@@ -163,9 +149,6 @@ function fraudEngine(user, now) {
   if (user.tap_count > 500000) fraud += 2;
   return fraud;
 }
-
-// ===================== HEALTH CHECK =====================
-app.get("/api", (req, res) => res.json({ status: "Server running" }));
 
 // ===================== USER REGISTRATION =====================
 app.post("/api/register", async (req, res) => {
@@ -218,9 +201,9 @@ app.post("/api/login", async (req, res) => {
   } catch (err) { res.status(400).json({ success: false, error: err.message }); }
 });
 
-// ===================== TAP SYSTEM =====================
+// ===================== TAP SYSTEM + COMBO =====================
 app.post("/api/tap", async (req, res) => {
-  const { telegram_id } = req.body;
+  const { telegram_id, combo = 1 } = req.body;
   const result = await pool.query("SELECT * FROM users WHERE telegram_id=$1", [telegram_id]);
   if (!result.rows.length) return res.json({ error: "User not found" });
   let user = result.rows[0];
@@ -239,9 +222,10 @@ app.post("/api/tap", async (req, res) => {
   const newFraudScore = fraudEngine(user, now);
   if (newFraudScore > 80) { await pool.query("UPDATE users SET banned=true WHERE telegram_id=$1", [telegram_id]); return res.json({ error: "Fraud detected. Account banned." }); }
 
-  const power = VIP_POWER[user.vip];
+  const power = VIP_POWER[user.vip] * combo;
   const newCoins = user.coins + power;
   const newBalance = (newCoins / 100000000) * TOTAL_POOL;
+  const newMaxCombo = Math.max(user.max_combo || 0, combo);
 
   await pool.query(`
     UPDATE users SET
@@ -252,76 +236,19 @@ app.post("/api/tap", async (req, res) => {
       fraud_score=$4,
       hourly_taps=$5,
       hour_timestamp=$6,
-      last_daily_bonus=$7
-    WHERE telegram_id=$8
-  `, [
-    newCoins,
-    newBalance,
-    now,
-    newFraudScore,
-    user.hourly_taps + 1,
-    user.hour_timestamp,
-    dailyBonusGiven ? now : user.last_daily_bonus,
-    telegram_id
-  ]);
+      last_daily_bonus=$7,
+      max_combo=$8
+    WHERE telegram_id=$9
+  `, [newCoins, newBalance, now, newFraudScore, user.hourly_taps+1, user.hour_timestamp, dailyBonusGiven ? now : user.last_daily_bonus, newMaxCombo, telegram_id]);
 
   const coinsPerHour = VIP_POWER[user.vip] * Math.min(user.hourly_taps + 1, VIP_LIMITS[user.vip]);
-  const projectedDaily = coinsPerHour * 24;
-  const projectedWeekly = projectedDaily * 7;
-
-  res.json({
-    success: true,
-    coins: newCoins,
-    balance: newBalance,
-    dailyBonusGiven,
-    coinsPerTap: power,
-    projection: { daily: projectedDaily, weekly: projectedWeekly }
-  });
+  res.json({ success:true, coins:newCoins, balance:newBalance, dailyBonusGiven, coinsPerTap:power, projection:{daily:coinsPerHour*24, weekly:coinsPerHour*24*7} });
 });
 
-// ===================== TASKS =====================
-app.get("/api/tasks", async (req, res) => {
-  const { vip } = req.query;
-  let query = "SELECT * FROM tasks WHERE active=true";
-  if (vip === "true") query += " AND is_vip=true";
-  const tasks = await pool.query(query);
-  res.json(tasks.rows);
-});
-
-app.post("/api/tasks/submit", async (req, res) => {
-  const { telegram_id, task_id, proof } = req.body;
-  await pool.query("INSERT INTO task_submissions(task_id, telegram_id, proof) VALUES($1,$2,$3)", [task_id, telegram_id, proof]);
-  res.json({ success: true });
-});
-
-// ===================== PAYMENTS =====================
-app.post("/api/payment", upload.single("proof"), async (req, res) => {
-  const { user_id, amount } = req.body;
-  const proof = req.file ? req.file.filename : null;
-  const result = await pool.query("INSERT INTO payments(user_id, amount, proof) VALUES($1,$2,$3) RETURNING *", [user_id, amount, proof]);
-  res.json({ success: true, payment: result.rows[0] });
-});
-
-app.post("/api/withdraw", async (req, res) => {
-  const { telegram_id } = req.body;
-  const now = new Date();
-  if (now < LAUNCH_DATE) return res.json({ error: "NGCoin launches December 1, 2026" });
-  res.json({ message: "Withdrawal fee ₦10,000 required. Contact @" + ADMIN_USERNAME });
-});
-
-// ===================== ADMIN BROWSER =====================
-app.post("/api/admin/activate-vip", async (req, res) => {
-  const { username, level, password } = req.body;
-  if (username !== ADMIN_USERNAME_BROWSER || password !== ADMIN_PASSWORD_BROWSER) return res.json({ error: "Not authorized" });
-  await pool.query("UPDATE users SET vip=$1 WHERE username=$2", [level, username]);
-  res.json({ success: true });
-});
-
-app.post("/api/admin/ban", async (req, res) => {
-  const { username, password } = req.body;
-  if (username !== ADMIN_USERNAME_BROWSER || password !== ADMIN_PASSWORD_BROWSER) return res.json({ error: "Not authorized" });
-  await pool.query("UPDATE users SET banned=true WHERE username=$1", [username]);
-  res.json({ success: true });
+// ===================== COMBO LEADERBOARD =====================
+app.get("/api/leaderboard/combo", async (req, res) => {
+  const result = await pool.query("SELECT username, max_combo FROM users ORDER BY max_combo DESC LIMIT 10");
+  res.json(result.rows);
 });
 
 // ===================== LEADERBOARD =====================
@@ -334,58 +261,11 @@ app.get("/api/leaderboard", async (req, res) => {
 app.get("/api/countdown", (req, res) => {
   const now = new Date();
   const diff = LAUNCH_DATE - now;
-  if (diff <= 0) return res.json({ launched: true });
-  res.json({ launched: false, time: diff });
+  res.json({ launched: diff<=0, time: diff });
 });
 
-// ===================== FRONTEND WITH MONETAG SDK =====================
-app.get("/", (req, res) => {
-  res.send(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>NGCoin Mini App</title>
-  <!-- Monetag SDK -->
-  <script src='//libtl.com/sdk.js' data-zone='10677338' data-sdk='show_10677338'></script>
-</head>
-<body>
-  <h1>Welcome to NGCoin Mini App</h1>
-
-  <button onclick="showRewarded()">Watch Rewarded Ad</button>
-  <button onclick="showPopup()">Rewarded Popup</button>
-  <button onclick="showInApp()">In-App Interstitial</button>
-
-  <script>
-    function showRewarded() {
-      show_10677338().then(() => {
-        alert('You have seen an ad!');
-      });
-    }
-
-    function showPopup() {
-      show_10677338('pop').then(() => {
-        alert('Popup ad completed!');
-      }).catch(e => {});
-    }
-
-    function showInApp() {
-      show_10677338({
-        type: 'inApp',
-        inAppSettings: {
-          frequency: 2,
-          capping: 0.1,
-          interval: 30,
-          timeout: 5,
-          everyPage: false
-        }
-      });
-    }
-  </script>
-</body>
-</html>
-  `);
-});
+// ===================== FRONTEND =====================
+app.get("/", (req,res) => res.sendFile(__dirname + "/frontend.html"));
 
 // ===================== START SERVER =====================
 app.listen(PORT, () => console.log(`NGCoin Mini App running on port ${PORT}`));
