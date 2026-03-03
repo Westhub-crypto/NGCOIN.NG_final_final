@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🪙 NGCoin Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.monetag.com/tag.js"></script>
+<style>
+/* ================= GLOBAL STYLES ================= */
+body {
+  margin:0; padding:0;
+  font-family: "Poppins", sans-serif;
+  background: linear-gradient(135deg,#0f172a,#1e293b);
+  color:#fff;
+  display:flex; flex-direction:column; align-items:center;
+}
+h1,h2,h3 { margin:5px 0; }
+button {
+  padding:10px 20px; margin:5px; border-radius:12px; border:none;
+  cursor:pointer; font-weight:bold; transition:0.3s; background:#1e293b; color:#fff;
+}
+button:hover { transform:scale(1.05); background:#334155; }
+
+/* ================= COIN ================= */
+.coin {
+  font-size:90px; cursor:pointer; display:inline-block;
+  margin:20px; animation:drop 0.4s;
+}
+@keyframes drop{0%{transform:translateY(-50px);}100%{transform:translateY(0);}}
+
+/* ================= COUNTDOWN ================= */
+#countdown{
+  font-size:20px; margin:10px; padding:8px 15px; background:#334155; border-radius:12px;
+  display:inline-block; font-weight:bold; letter-spacing:1px;
+}
+
+/* ================= TABS ================= */
+.tab{margin:15px; display:flex; flex-wrap:wrap; justify-content:center;}
+.tab button{margin:5px 8px; min-width:100px;}
+
+/* ================= SECTIONS ================= */
+.section{display:none; width:90%; max-width:400px; padding:15px; margin:10px auto; background:#1e293b; border-radius:15px;}
+.section.active{display:block;}
+.card{
+  padding:10px; margin:8px 0; border-radius:12px; background:#0f172a; box-shadow:0 2px 6px rgba(0,0,0,0.5);
+}
+.card button{width:100%; background:#0ea5e9; margin-top:5px;}
+
+/* ================= LEADERBOARD ================= */
+#leaderboard-list .card{display:flex; justify-content:space-between; align-items:center; padding:8px 10px;}
+
+/* ================= VIP PROGRESS ================= */
+.vip-bar{
+  height:15px; background:#334155; border-radius:8px; margin:5px 0;
+}
+.vip-fill{
+  height:100%; border-radius:8px; background:linear-gradient(90deg,#0ea5e9,#22c55e);
+  width:0%; transition:width 0.5s ease;
+}
+
+/* ================= FOOTER ================= */
+footer{
+  margin-top:auto; padding:10px; font-size:12px; color:#aaa;
+}
+</style>
+</head>
+<body>
+<h1>🪙 NGCoin Mini App</h1>
+<div id="user-info">
+<h3 id="username">Loading...</h3>
+<p>Coins: <span id="coins">0</span> | ₦<span id="naira">0</span></p>
+<p>Referral: <span id="referral">Loading...</span></p>
+<p id="countdown">Loading countdown...</p>
+<div class="vip-bar"><div class="vip-fill" id="vip-fill"></div></div>
+<p>VIP Level: <span id="vip-level">NORMAL</span></p>
+</div>
+
+<div class="coin" onclick="tap()">🪙</div>
+
+<div class="tab">
+  <button onclick="showSection('tasks')">Tasks</button>
+  <button onclick="showSection('leaderboard')">Leaderboard</button>
+  <button onclick="showSection('vip')">VIP Upgrade</button>
+  <button onclick="showSection('admin')">Admin</button>
+  <button onclick="withdraw()">Withdraw</button>
+</div>
+
+<!-- ================= SECTIONS ================= -->
+<div class="section" id="tasks">
+<h2>Available Tasks</h2>
+<div id="task-list"></div>
+</div>
+
+<div class="section" id="leaderboard">
+<h2>Leaderboard</h2>
+<div id="leaderboard-list"></div>
+</div>
+
+<div class="section" id="vip">
+<h2>VIP Upgrade</h2>
+<p>VIP1: 2000₦ | VIP2: 5000₦ | VIP3: 8000₦ | VIP4: 11000₦</p>
+<button onclick="vipRequest('VIP1')">Activate VIP1</button>
+<button onclick="vipRequest('VIP2')">Activate VIP2</button>
+<button onclick="vipRequest('VIP3')">Activate VIP3</button>
+<button onclick="vipRequest('VIP4')">Activate VIP4</button>
+</div>
+
+<div class="section" id="admin">
+<h2>Admin Dashboard</h2>
+<input id="admin-u" placeholder="Username">
+<input id="admin-lvl" placeholder="VIP1-VIP4">
+<button onclick="adminActivate()">Activate VIP</button>
+<button onclick="adminBan()">Ban User</button>
+<h3>Pending Tasks</h3>
+<div id="pending-tasks"></div>
+</div>
+
+<footer>
+  <div id="monetag-slot">Monetag Ad Placeholder</div>
+</footer>
+
+<script>
+const tg = window.Telegram.WebApp; tg.expand();
+let userData={vip:"NORMAL"};
+
+async function fetchUser(){
+  const user=tg.initDataUnsafe.user;
+  userData.telegram_id=user.id; userData.username=user.username;
+  document.getElementById("username").innerText=user.username;
+  document.getElementById("referral").innerText="https://t.me/NGCoin_Earn_Tap_bot?start="+user.id;
+  loadLeaderboard(); loadTasks(); loadPendingTasks(); loadCountdown(); updateVIPBar();
+}
+
+async function tap(){
+  const r=await fetch("/api/tap",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({telegram_id:userData.telegram_id})});
+  const d=await r.json(); if(d.error) return alert(d.error);
+  animateCoinCount(d.coins); document.getElementById("naira").innerText=d.naira.toFixed(2);
+}
+
+function animateCoinCount(newVal){
+  const el=document.getElementById("coins");
+  let current=parseInt(el.innerText)||0;
+  const diff=newVal-current; let i=0;
+  const steps=20;
+  const interval=setInterval(()=>{
+    if(i>=steps){ clearInterval(interval); el.innerText=newVal; return; }
+    el.innerText=current+Math.floor(diff*i/steps); i++;
+  },25);
+}
+
+async function withdraw(){
+  const r=await fetch("/api/withdraw",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({telegram_id:userData.telegram_id})});
+  const d=await r.json(); alert(d.error||d.message);
+}
+
+function showSection(id){document.querySelectorAll(".section").forEach(s=>s.classList.remove("active"));document.getElementById(id).classList.add("active");}
+
+async function vipRequest(level){alert("Send VIP fee and username to @ngcointap for "+level);}
+
+async function adminActivate(){
+  await fetch("/api/admin/activate-vip",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:document.getElementById("admin-u").value,level:document.getElementById("admin-lvl").value})});
+  alert("VIP Activated"); updateVIPBar();
+}
+async function adminBan(){
+  await fetch("/api/admin/ban",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:document.getElementById("admin-u").value})});
+  alert("User Banned");
+}
+
+async function loadTasks(){
+  const r=await fetch("/api/tasks"); const tasks=await r.json(); const taskDiv=document.getElementById("task-list"); taskDiv.innerHTML="";
+  tasks.forEach(t=>{
+    const c=document.createElement("div"); c.className="card"; c.innerHTML=`${t.title} | Reward: ${t.reward}`;
+    const b=document.createElement("button"); b.innerText="Submit"; b.onclick=()=>submitTask(t.id);
+    c.appendChild(b); taskDiv.appendChild(c);
+  });
+}
+
+async function submitTask(task_id){
+  const proof=prompt("Submit proof link/text:"); if(!proof) return;
+  await fetch("/api/tasks/submit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({telegram_id:userData.telegram_id,task_id,proof})});
+  alert("Task submitted!");
+}
+
+async function loadLeaderboard(){
+  const r=await fetch("/api/leaderboard"); const data=await r.json(); const div=document.getElementById("leaderboard-list"); div.innerHTML="";
+  data.forEach((u,i)=>{const c=document.createElement("div"); c.className="card"; c.innerHTML=`${i+1}. ${u.username} <span>${u.coins} coins</span>`; div.appendChild(c);});
+}
+
+async function loadPendingTasks(){document.getElementById("pending-tasks").innerHTML="Pending tasks will appear here.";}
+
+async function loadCountdown(){
+  const r=await fetch("/api/countdown"); const d=await r.json(); const c=document.getElementById("countdown");
+  if(d.launched){c.innerText="NGCoin Launched! Withdrawals unlocked!"; return;}
+  let diff=d.time;
+  const days=Math.floor(diff/(1000*60*60*24)); diff-=days*1000*60*60*24;
+  const hrs=Math.floor(diff/(1000*60*60)); diff-=hrs*1000*60*60;
+  const mins=Math.floor(diff/(1000*60)); diff-=mins*1000*60;
+  const secs=Math.floor(diff/1000);
+  c.innerText=`Launch in ${days}d ${hrs}h ${mins}m ${secs}s`; setTimeout(loadCountdown,1000);
+}
+
+function updateVIPBar(){
+  const levels={"NORMAL":0,"VIP1":25,"VIP2":50,"VIP3":75,"VIP4":100};
+  document.getElementById("vip-level").innerText=userData.vip;
+  document.getElementById("vip-fill").style.width=levels[userData.vip]+"%";
+}
+
+fetchUser();
+</script>
+</body>
+</html>
