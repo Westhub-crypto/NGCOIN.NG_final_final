@@ -3,14 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🪙 NGCoin Mini App</title>
+<title>🪙 NGCoin + Telegram Mini App</title>
+
+<!-- Telegram & Monetag Scripts -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdn.monetag.com/tag.js"></script>
+
 <style>
 /* ================= GLOBAL STYLES ================= */
 body {
   margin:0; padding:0;
-  font-family: "Poppins", sans-serif;
+  font-family: "Poppins", Arial, sans-serif;
   background: linear-gradient(135deg,#0f172a,#1e293b);
   color:#fff;
   display:flex; flex-direction:column; align-items:center;
@@ -21,6 +24,7 @@ button {
   cursor:pointer; font-weight:bold; transition:0.3s; background:#1e293b; color:#fff;
 }
 button:hover { transform:scale(1.05); background:#334155; }
+input { padding:10px; margin:5px 0; border-radius:8px; border:none; width:100%; }
 
 /* ================= COIN ================= */
 .coin {
@@ -59,6 +63,12 @@ button:hover { transform:scale(1.05); background:#334155; }
   width:0%; transition:width 0.5s ease;
 }
 
+/* ================= CONTAINER FOR EMAIL/PASSWORD ================= */
+.container {
+  max-width: 500px; margin: 20px auto; background: #1e293b; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+.container input, .container button { margin: 5px 0; }
+
 /* ================= FOOTER ================= */
 footer{
   margin-top:auto; padding:10px; font-size:12px; color:#aaa;
@@ -66,14 +76,16 @@ footer{
 </style>
 </head>
 <body>
-<h1>🪙 NGCoin Mini App</h1>
+<h1>🪙 NGCoin + Telegram Mini App</h1>
+
+<!-- ================= NGCoin User Info ================= -->
 <div id="user-info">
-<h3 id="username">Loading...</h3>
-<p>Coins: <span id="coins">0</span> | ₦<span id="naira">0</span></p>
-<p>Referral: <span id="referral">Loading...</span></p>
-<p id="countdown">Loading countdown...</p>
-<div class="vip-bar"><div class="vip-fill" id="vip-fill"></div></div>
-<p>VIP Level: <span id="vip-level">NORMAL</span></p>
+  <h3 id="username">Loading...</h3>
+  <p>Coins: <span id="coins">0</span> | ₦<span id="naira">0</span></p>
+  <p>Referral: <span id="referral">Loading...</span></p>
+  <p id="countdown">Loading countdown...</p>
+  <div class="vip-bar"><div class="vip-fill" id="vip-fill"></div></div>
+  <p>VIP Level: <span id="vip-level">NORMAL</span></p>
 </div>
 
 <div class="coin" onclick="tap()">🪙</div>
@@ -84,36 +96,58 @@ footer{
   <button onclick="showSection('vip')">VIP Upgrade</button>
   <button onclick="showSection('admin')">Admin</button>
   <button onclick="withdraw()">Withdraw</button>
+  <button onclick="showSection('email-login')">Email Login/Register</button>
 </div>
 
 <!-- ================= SECTIONS ================= -->
 <div class="section" id="tasks">
-<h2>Available Tasks</h2>
-<div id="task-list"></div>
+  <h2>Available Tasks</h2>
+  <div id="task-list"></div>
 </div>
 
 <div class="section" id="leaderboard">
-<h2>Leaderboard</h2>
-<div id="leaderboard-list"></div>
+  <h2>Leaderboard</h2>
+  <div id="leaderboard-list"></div>
 </div>
 
 <div class="section" id="vip">
-<h2>VIP Upgrade</h2>
-<p>VIP1: 2000₦ | VIP2: 5000₦ | VIP3: 8000₦ | VIP4: 11000₦</p>
-<button onclick="vipRequest('VIP1')">Activate VIP1</button>
-<button onclick="vipRequest('VIP2')">Activate VIP2</button>
-<button onclick="vipRequest('VIP3')">Activate VIP3</button>
-<button onclick="vipRequest('VIP4')">Activate VIP4</button>
+  <h2>VIP Upgrade</h2>
+  <p>VIP1: 2000₦ | VIP2: 5000₦ | VIP3: 8000₦ | VIP4: 11000₦</p>
+  <button onclick="vipRequest('VIP1')">Activate VIP1</button>
+  <button onclick="vipRequest('VIP2')">Activate VIP2</button>
+  <button onclick="vipRequest('VIP3')">Activate VIP3</button>
+  <button onclick="vipRequest('VIP4')">Activate VIP4</button>
 </div>
 
 <div class="section" id="admin">
-<h2>Admin Dashboard</h2>
-<input id="admin-u" placeholder="Username">
-<input id="admin-lvl" placeholder="VIP1-VIP4">
-<button onclick="adminActivate()">Activate VIP</button>
-<button onclick="adminBan()">Ban User</button>
-<h3>Pending Tasks</h3>
-<div id="pending-tasks"></div>
+  <h2>Admin Dashboard</h2>
+  <input id="admin-u" placeholder="Username">
+  <input id="admin-lvl" placeholder="VIP1-VIP4">
+  <button onclick="adminActivate()">Activate VIP</button>
+  <button onclick="adminBan()">Ban User</button>
+  <h3>Pending Tasks</h3>
+  <div id="pending-tasks"></div>
+</div>
+
+<!-- ================= EMAIL/PASSWORD REGISTER/LOGIN ================= -->
+<div class="section" id="email-login">
+  <div class="container">
+    <h2>Email/Password Mini App</h2>
+    <h3>Register</h3>
+    <input type="text" id="regUsername" placeholder="Username">
+    <input type="text" id="regEmail" placeholder="Email">
+    <input type="password" id="regPassword" placeholder="Password">
+    <input type="text" id="regReferral" placeholder="Referral Code (Optional)">
+    <button onclick="registerEmail()">Register</button>
+
+    <h3>Login</h3>
+    <input type="text" id="loginEmail" placeholder="Email">
+    <input type="password" id="loginPassword" placeholder="Password">
+    <button onclick="loginEmail()">Login</button>
+
+    <h3>Tasks</h3>
+    <div id="tasksContainer"></div>
+  </div>
 </div>
 
 <footer>
@@ -123,12 +157,16 @@ footer{
 <script>
 const tg = window.Telegram.WebApp; tg.expand();
 let userData={vip:"NORMAL"};
+let currentUser=null;
 
+// ================= NGCoin Functions =================
 async function fetchUser(){
-  const user=tg.initDataUnsafe.user;
-  userData.telegram_id=user.id; userData.username=user.username;
-  document.getElementById("username").innerText=user.username;
-  document.getElementById("referral").innerText="https://t.me/NGCoin_Earn_Tap_bot?start="+user.id;
+  if(tg.initDataUnsafe && tg.initDataUnsafe.user){
+    const user=tg.initDataUnsafe.user;
+    userData.telegram_id=user.id; userData.username=user.username;
+    document.getElementById("username").innerText=user.username;
+    document.getElementById("referral").innerText="https://t.me/NGCoin_Earn_Tap_bot?start="+user.id;
+  }
   loadLeaderboard(); loadTasks(); loadPendingTasks(); loadCountdown(); updateVIPBar();
 }
 
@@ -170,8 +208,8 @@ async function adminBan(){
 async function loadTasks(){
   const r=await fetch("/api/tasks"); const tasks=await r.json(); const taskDiv=document.getElementById("task-list"); taskDiv.innerHTML="";
   tasks.forEach(t=>{
-    const c=document.createElement("div"); c.className="card"; c.innerHTML=`${t.title} | Reward: ${t.reward}`;
-    const b=document.createElement("button"); b.innerText="Submit"; b.onclick=()=>submitTask(t.id);
+    const c=document.createElement('div'); c.className="card"; c.innerHTML=`${t.title} | Reward: ${t.reward}`;
+    const b=document.createElement('button'); b.innerText="Submit"; b.onclick=()=>submitTask(t.id);
     c.appendChild(b); taskDiv.appendChild(c);
   });
 }
@@ -184,7 +222,7 @@ async function submitTask(task_id){
 
 async function loadLeaderboard(){
   const r=await fetch("/api/leaderboard"); const data=await r.json(); const div=document.getElementById("leaderboard-list"); div.innerHTML="";
-  data.forEach((u,i)=>{const c=document.createElement("div"); c.className="card"; c.innerHTML=`${i+1}. ${u.username} <span>${u.coins} coins</span>`; div.appendChild(c);});
+  data.forEach((u,i)=>{const c=document.createElement('div'); c.className="card"; c.innerHTML=`${i+1}. ${u.username} <span>${u.coins} coins</span>`; div.appendChild(c);});
 }
 
 async function loadPendingTasks(){document.getElementById("pending-tasks").innerHTML="Pending tasks will appear here.";}
@@ -206,7 +244,57 @@ function updateVIPBar(){
   document.getElementById("vip-fill").style.width=levels[userData.vip]+"%";
 }
 
+// ================= EMAIL/PASSWORD FUNCTIONS =================
+async function registerEmail() {
+  const username = document.getElementById('regUsername').value;
+  const email = document.getElementById('regEmail').value;
+  const password = document.getElementById('regPassword').value;
+  const referral_code = document.getElementById('regReferral').value;
+
+  const res = await fetch('/api/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ telegram_id: 'tg_dummy', email, password, username, referral_code })
+  });
+  const data = await res.json();
+  alert(data.success ? "Registered successfully" : data.error);
+}
+
+async function loginEmail() {
+  const email = document.getElementById('loginEmail').value;
+  const password = document.getElementById('loginPassword').value;
+
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json();
+  if (data.success) {
+    currentUser = data.user;
+    userData.vip = currentUser.vip ? currentUser.vip : "NORMAL";
+    alert("Login successful");
+    loadTasksEmail();
+  } else alert(data.message);
+}
+
+async function loadTasksEmail() {
+  if(!currentUser) return;
+  const vip = currentUser.vip ? 'true' : 'false';
+  const res = await fetch(`/api/tasks?vip=${vip}`);
+  const tasks = await res.json();
+  const container = document.getElementById('tasksContainer');
+  container.innerHTML = '';
+  tasks.forEach(task => {
+    const div = document.createElement('div');
+    div.className = 'task';
+    div.innerHTML = `<strong>${task.title}</strong><p>${task.description || ''}</p><p>Reward: ${task.reward}</p>`;
+    container.appendChild(div);
+  });
+}
+
+// ================= INIT =================
 fetchUser();
 </script>
 </body>
-</html>
+  </html>
