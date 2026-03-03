@@ -1,5 +1,5 @@
 // ========================================================
-// NGCoin Production System - FULL server.js
+// NGCoin + Telegram Mini App Unified Server.js
 // ========================================================
 
 const express = require("express");
@@ -8,23 +8,46 @@ const crypto = require("crypto");
 const axios = require("axios");
 const rateLimit = require("express-rate-limit");
 const { Pool } = require("pg");
+const bcrypt = require("bcrypt");
+const cors = require("cors");
+const multer = require("multer");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHANNEL_USERNAME = "@CrsWc0cl-wY4YzE0"; // channel username
+const BOT_TOKEN = process.env.BOT_TOKEN || "your_bot_token_here";
+const CHANNEL_USERNAME = "@CrsWc0cl-wY4YzE0";
 const ADMIN_USERNAME = "ngcointap";
 const LAUNCH_DATE = new Date("2026-12-01T00:00:00");
 const REFERRAL_BONUS = 500;
 const TOTAL_POOL = 10000000;
 
+// ===================== MIDDLEWARE =====================
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(cors());
+app.use(express.static("public"));
 app.use(rateLimit({ windowMs: 1000, max: 15 }));
+
+// File upload config
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  },
+});
+const upload = multer({ storage });
 
 // ================= DATABASE =================
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  connectionString: process.env.DATABASE_URL || undefined,
+  user: process.env.DB_USER || "postgres",
+  host: process.env.DB_HOST || "localhost",
+  database: process.env.DB_NAME || "telegram_app",
+  password: process.env.DB_PASSWORD || "postgres",
+  port: process.env.DB_PORT || 5432,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
 });
 
 // ================= INIT TABLES =================
@@ -34,6 +57,8 @@ const pool = new Pool({
       CREATE TABLE IF NOT EXISTS users(
         id SERIAL PRIMARY KEY,
         telegram_id TEXT UNIQUE,
+        email TEXT UNIQUE,
+        password TEXT,
         username TEXT UNIQUE,
         name TEXT,
         country TEXT,
@@ -41,12 +66,15 @@ const pool = new Pool({
         device_hash TEXT,
         vip TEXT DEFAULT 'NORMAL',
         coins BIGINT DEFAULT 0,
+        balance NUMERIC DEFAULT 0,
         banned BOOLEAN DEFAULT false,
         fraud_score INT DEFAULT 0,
         tap_count INT DEFAULT 0,
         last_tap BIGINT DEFAULT 0,
         hourly_taps INT DEFAULT 0,
         hour_timestamp BIGINT DEFAULT 0,
+        referral_code TEXT,
+        referred_by TEXT,
         referrer_id TEXT,
         referral_count INT DEFAULT 0
       );
@@ -56,7 +84,9 @@ const pool = new Pool({
       CREATE TABLE IF NOT EXISTS tasks(
         id SERIAL PRIMARY KEY,
         title TEXT,
-        reward INT,
+        description TEXT,
+        reward NUMERIC,
+        is_vip BOOLEAN DEFAULT false,
         active BOOLEAN DEFAULT true
       );
     `);
@@ -71,6 +101,17 @@ const pool = new Pool({
       );
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS payments(
+        id SERIAL PRIMARY KEY,
+        user_id INT REFERENCES users(id),
+        amount NUMERIC,
+        proof TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
     console.log("All tables initialized successfully.");
   } catch (err) {
     console.error("Error initializing tables:", err);
@@ -78,21 +119,8 @@ const pool = new Pool({
 })();
 
 // ================= VIP LIMITS =================
-const VIP_LIMITS = {
-  NORMAL: 100,
-  VIP1: 1000,
-  VIP2: 2000,
-  VIP3: 3000,
-  VIP4: 5000,
-};
-
-const VIP_POWER = {
-  NORMAL: 1,
-  VIP1: 2,
-  VIP2: 3,
-  VIP3: 4,
-  VIP4: 5,
-};
+const VIP_LIMITS = { NORMAL: 100, VIP1: 1000, VIP2: 2000, VIP3: 3000, VIP4: 5000 };
+const VIP_POWER = { NORMAL: 1, VIP1: 2, VIP2: 3, VIP3: 4, VIP4: 5 };
 
 // ================= TELEGRAM VERIFICATION =================
 function verifyTelegram(data) {
@@ -115,10 +143,7 @@ function generateDeviceHash(req) {
 async function verifyChannel(telegram_id) {
   try {
     const url = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember`;
-    const response = await axios.post(url, {
-      chat_id: CHANNEL_USERNAME,
-      user_id: telegram_id,
-    });
+    const response = await axios.post(url, { chat_id: CHANNEL_USERNAME, user_id: telegram_id });
     const status = response.data.result.status;
     return status === "member" || status === "administrator" || status === "creator";
   } catch (err) {
@@ -130,43 +155,72 @@ async function verifyChannel(telegram_id) {
 function fraudEngine(user, now) {
   let fraud = user.fraud_score;
   const diff = now - user.last_tap;
-  if (diff < 120) fraud += 5; // too fast
+  if (diff < 120) fraud += 5;
   if (user.hourly_taps > VIP_LIMITS[user.vip]) fraud += 10;
   if (user.tap_count > 500000) fraud += 2;
   return fraud;
 }
 
-// ================= REGISTER =================
+// ================= HEALTH CHECK =================
+app.get("/api", (req, res) => res.json({ status: "Server running" }));
+
+// ================= USER REGISTRATION =================
 app.post("/api/register", async (req, res) => {
-  const { telegramData, name, country, phone, ref } = req.body;
+  try {
+    const { telegramData, name, country, phone, ref, email, password, username, referral_code } = req.body;
 
-  if (!verifyTelegram(telegramData)) return res.json({ error: "Telegram verification failed" });
+    let deviceHash = generateDeviceHash(req);
 
-  const deviceHash = generateDeviceHash(req);
+    // NGCoin style registration
+    if (telegramData) {
+      if (!verifyTelegram(telegramData)) return res.json({ error: "Telegram verification failed" });
+      const existingDevice = await pool.query("SELECT * FROM users WHERE device_hash=$1", [deviceHash]);
+      if (existingDevice.rows.length) return res.json({ error: "One device per user allowed" });
 
-  const existingDevice = await pool.query("SELECT * FROM users WHERE device_hash=$1", [deviceHash]);
-  if (existingDevice.rows.length) return res.json({ error: "One device per user allowed" });
+      await pool.query(
+        `INSERT INTO users 
+        (telegram_id, username, name, country, phone, device_hash, referrer_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [telegramData.id, telegramData.username, name, country, phone, deviceHash, ref || null]
+      );
 
-  await pool.query(
-    `INSERT INTO users 
-       (telegram_id, username, name, country, phone, device_hash, referrer_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [telegramData.id, telegramData.username, name, country, phone, deviceHash, ref || null]
-  );
+      if (ref) await pool.query(`UPDATE users SET coins = coins + $1, referral_count = referral_count + 1 WHERE telegram_id = $2`, [REFERRAL_BONUS, ref]);
 
-  if (ref) {
-    await pool.query(
-      `UPDATE users 
-       SET coins = coins + $1, referral_count = referral_count + 1
-       WHERE telegram_id = $2`,
-      [REFERRAL_BONUS, ref]
-    );
+      return res.json({ success: true });
+    }
+
+    // Telegram Mini App style registration
+    if (email && password && username) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const result = await pool.query(
+        "INSERT INTO users (telegram_id, email, password, username, referred_by) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+        [null, email, hashedPassword, username, referral_code || null]
+      );
+      return res.json({ success: true, user: result.rows[0] });
+    }
+
+    res.json({ error: "Invalid registration data" });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
   }
-
-  res.json({ success: true });
 });
 
-// ================= TAP =================
+// ================= USER LOGIN =================
+app.post("/api/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const userRes = await pool.query("SELECT * FROM users WHERE email=$1", [email]);
+    if (userRes.rows.length === 0) return res.status(404).json({ success: false, message: "User not found" });
+    const user = userRes.rows[0];
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ success: false, message: "Incorrect password" });
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// ================= TAP SYSTEM =================
 app.post("/api/tap", async (req, res) => {
   const { telegram_id } = req.body;
   const result = await pool.query("SELECT * FROM users WHERE telegram_id=$1", [telegram_id]);
@@ -174,52 +228,97 @@ app.post("/api/tap", async (req, res) => {
 
   let user = result.rows[0];
   if (user.banned) return res.json({ error: "Account banned" });
-
   const joined = await verifyChannel(telegram_id);
   if (!joined) return res.json({ error: "Join channel first" });
 
   const now = Date.now();
-  if (now - user.hour_timestamp > 3600000) {
-    user.hourly_taps = 0;
-    user.hour_timestamp = now;
-  }
+  if (now - user.hour_timestamp > 3600000) { user.hourly_taps = 0; user.hour_timestamp = now; }
   if (user.hourly_taps >= VIP_LIMITS[user.vip]) return res.json({ error: "Hourly tap limit reached" });
 
   const newFraudScore = fraudEngine(user, now);
-  if (newFraudScore > 80) {
-    await pool.query("UPDATE users SET banned=true WHERE telegram_id=$1", [telegram_id]);
-    return res.json({ error: "Fraud detected. Account banned." });
-  }
+  if (newFraudScore > 80) { await pool.query("UPDATE users SET banned=true WHERE telegram_id=$1", [telegram_id]); return res.json({ error: "Fraud detected. Account banned." }); }
 
   const power = VIP_POWER[user.vip];
   await pool.query(
     `UPDATE users SET
-       coins = coins + $1,
-       tap_count = tap_count + 1,
-       last_tap = $2,
-       fraud_score = $3,
-       hourly_taps = $4,
-       hour_timestamp = $5
-       WHERE telegram_id = $6`,
+      coins = coins + $1,
+      tap_count = tap_count + 1,
+      last_tap = $2,
+      fraud_score = $3,
+      hourly_taps = $4,
+      hour_timestamp = $5
+      WHERE telegram_id = $6`,
     [power, now, newFraudScore, user.hourly_taps + 1, user.hour_timestamp, telegram_id]
   );
 
   const updated = await pool.query("SELECT coins FROM users WHERE telegram_id=$1", [telegram_id]);
   const coins = updated.rows[0].coins;
   const naira = (coins / 100000000) * TOTAL_POOL;
-
   res.json({ coins, naira });
 });
 
-// ================= COUNTDOWN =================
-app.get("/api/countdown", (req, res) => {
-  const now = new Date();
-  const diff = LAUNCH_DATE - now;
-  if (diff <= 0) return res.json({ launched: true });
-  res.json({ launched: false, time: diff });
+// ================= TASK SYSTEM =================
+app.get("/api/tasks", async (req, res) => {
+  const { vip } = req.query;
+  let query = "SELECT * FROM tasks WHERE active=true";
+  if (vip === "true") query += " AND is_vip=true";
+  const tasks = await pool.query(query);
+  res.json(tasks.rows);
 });
 
-// ================= ADMIN DASHBOARD =================
+app.post("/api/tasks/submit", async (req, res) => {
+  const { telegram_id, task_id, proof } = req.body;
+  await pool.query("INSERT INTO task_submissions(task_id, telegram_id, proof) VALUES($1,$2,$3)", [task_id, telegram_id, proof]);
+  res.json({ success: true });
+});
+
+app.post("/api/admin/approve-task", async (req, res) => {
+  const { submission_id } = req.body;
+  const submission = await pool.query("SELECT * FROM task_submissions WHERE id=$1", [submission_id]);
+  if (!submission.rows.length) return res.json({ error: "Submission not found" });
+  const task = await pool.query("SELECT reward FROM tasks WHERE id=$1", [submission.rows[0].task_id]);
+  await pool.query("UPDATE users SET coins=coins+$1 WHERE telegram_id=$2", [task.rows[0].reward, submission.rows[0].telegram_id]);
+  await pool.query("UPDATE task_submissions SET approved=true WHERE id=$1", [submission_id]);
+  res.json({ success: true });
+});
+
+// ================= PAYMENTS & WITHDRAW =================
+app.post("/api/payment", upload.single("proof"), async (req, res) => {
+  try {
+    const { user_id, amount } = req.body;
+    const proof = req.file ? req.file.filename : null;
+    const result = await pool.query("INSERT INTO payments (user_id, amount, proof) VALUES ($1,$2,$3) RETURNING *", [user_id, amount, proof]);
+    res.json({ success: true, payment: result.rows[0] });
+  } catch (err) { res.status(400).json({ success: false, error: err.message }); }
+});
+
+app.post("/api/withdraw", async (req, res) => {
+  try {
+    const { user_id, telegram_id, amount } = req.body;
+    const now = new Date();
+    if (now < LAUNCH_DATE) return res.json({ error: "NGCoin launches December 1, 2026" });
+
+    if (user_id) {
+      const userRes = await pool.query("SELECT balance FROM users WHERE id=$1", [user_id]);
+      if (userRes.rows[0].balance < amount) return res.status(400).json({ success: false, message: "Insufficient balance" });
+      await pool.query("UPDATE users SET balance = balance - $1 WHERE id=$2", [amount, user_id]);
+      return res.json({ success: true, message: "Withdrawal requested" });
+    }
+
+    if (telegram_id) return res.json({ message: "Withdrawal fee ₦10,000 required. Contact @" + ADMIN_USERNAME });
+  } catch (err) { res.status(400).json({ success: false, error: err.message }); }
+});
+
+// ================= REFERRAL =================
+app.post("/api/referral", async (req, res) => {
+  try {
+    const { user_id, referred_by } = req.body;
+    await pool.query("UPDATE users SET referred_by=$1 WHERE id=$2", [referred_by, user_id]);
+    res.json({ success: true });
+  } catch (err) { res.status(400).json({ success: false, error: err.message }); }
+});
+
+// ================= ADMIN =================
 app.post("/api/admin/login", async (req, res) => {
   const { telegramData } = req.body;
   if (!verifyTelegram(telegramData)) return res.json({ error: "Telegram verification failed" });
@@ -240,56 +339,10 @@ app.post("/api/admin/ban", async (req, res) => {
   res.json({ success: true });
 });
 
-// ================= TASK SYSTEM =================
 app.post("/api/admin/add-task", async (req, res) => {
   const { title, reward } = req.body;
   await pool.query("INSERT INTO tasks(title, reward) VALUES($1,$2)", [title, reward]);
   res.json({ success: true });
-});
-
-app.get("/api/tasks", async (req, res) => {
-  const result = await pool.query("SELECT * FROM tasks WHERE active=true");
-  res.json(result.rows);
-});
-
-app.post("/api/tasks/submit", async (req, res) => {
-  const { telegram_id, task_id, proof } = req.body;
-  await pool.query(
-    `INSERT INTO task_submissions(task_id, telegram_id, proof)
-       VALUES($1,$2,$3)`,
-    [task_id, telegram_id, proof]
-  );
-  res.json({ success: true });
-});
-
-app.post("/api/admin/approve-task", async (req, res) => {
-  const { submission_id } = req.body;
-  const submission = await pool.query("SELECT * FROM task_submissions WHERE id=$1", [submission_id]);
-  if (!submission.rows.length) return res.json({ error: "Submission not found" });
-
-  const task = await pool.query("SELECT reward FROM tasks WHERE id=$1", [submission.rows[0].task_id]);
-  const reward = task.rows[0].reward;
-
-  await pool.query("UPDATE users SET coins=coins+$1 WHERE telegram_id=$2", [
-    reward,
-    submission.rows[0].telegram_id,
-  ]);
-
-  await pool.query("UPDATE task_submissions SET approved=true WHERE id=$1", [submission_id]);
-  res.json({ success: true });
-});
-
-// ================= WITHDRAW SYSTEM =================
-app.post("/api/withdraw", async (req, res) => {
-  const { telegram_id } = req.body;
-  const now = new Date();
-  if (now < LAUNCH_DATE)
-    return res.json({ error: "NGCoin launches December 1, 2026" });
-
-  const result = await pool.query("SELECT coins FROM users WHERE telegram_id=$1", [telegram_id]);
-  if (!result.rows.length) return res.json({ error: "User not found" });
-
-  res.json({ message: "Withdrawal fee ₦10,000 required. Contact @" + ADMIN_USERNAME });
 });
 
 // ================= LEADERBOARD =================
@@ -298,9 +351,16 @@ app.get("/api/leaderboard", async (req, res) => {
   res.json(result.rows);
 });
 
-// ================= FRONTEND =================
-app.get("/", async (req, res) => {
-  res.sendFile(__dirname + "/frontend.html"); // You can separate HTML if needed
+// ================= COUNTDOWN =================
+app.get("/api/countdown", (req, res) => {
+  const now = new Date();
+  const diff = LAUNCH_DATE - now;
+  if (diff <= 0) return res.json({ launched: true });
+  res.json({ launched: false, time: diff });
 });
 
-app.listen(PORT, () => console.log(`NGCoin Mini App running on port ${PORT}`));
+// ================= FRONTEND =================
+app.get("/", (req, res) => res.sendFile(__dirname + "/frontend.html"));
+
+// ================= START SERVER =================
+app.listen(PORT, () => console.log(`NGCoin Mini App server running on port ${PORT}`));
