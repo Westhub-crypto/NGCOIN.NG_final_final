@@ -34,9 +34,45 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ================= REDIS =================
-const redis = Redis.createClient({ url: process.env.REDIS_URL });
-redis.connect();
+// ================= REDIS (Safe Initialization) =================
+let redis;
+
+if (process.env.REDIS_URL) {
+  try {
+    redis = Redis.createClient({ url: process.env.REDIS_URL });
+    redis.on("error", (err) => {
+      console.warn("Redis connection error:", err.message);
+    });
+    redis.connect()
+      .then(() => console.log("✅ Redis connected"))
+      .catch((err) => console.warn("Redis failed to connect:", err.message));
+  } catch (err) {
+    console.warn("Redis setup failed:", err.message);
+  }
+} else {
+  console.log("⚠️ No REDIS_URL provided. Skipping Redis connection");
+}
+
+// Safe Redis functions
+async function setRedis(key, value, expireSeconds = 60) {
+  if (!redis) return;
+  try {
+    if (expireSeconds) await redis.set(key, value, { EX: expireSeconds });
+    else await redis.set(key, value);
+  } catch (err) {
+    console.warn("Redis set failed:", err.message);
+  }
+}
+
+async function getRedis(key) {
+  if (!redis) return null;
+  try {
+    return await redis.get(key);
+  } catch (err) {
+    console.warn("Redis get failed:", err.message);
+    return null;
+  }
+}
 
 // ================= WEBSOCKET =================
 const clients = new Map();
@@ -104,8 +140,6 @@ async function broadcastAdminUpdate() {
     console.error("Admin broadcast error:", err.message);
   }
 }
-
-// Broadcast every 10 seconds
 setInterval(broadcastAdminUpdate, 10000);
 
 // ================= INIT TABLES =================
