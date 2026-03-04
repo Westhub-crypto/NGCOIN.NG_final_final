@@ -1,133 +1,89 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NGCoin Mini App</title>
-<script src="//libtl.com/sdk.js" data-zone="10677338" data-sdk="show_10677338"></script>
-<style>
-  body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
-  #progressContainer { width: 100%; background: #ddd; border-radius: 10px; overflow: hidden; height: 20px; display: none; margin-top: 10px; }
-  #progressBar { width: 0%; height: 100%; background: #4caf50; }
-  button { margin: 5px; padding: 10px 20px; font-size: 16px; }
-</style>
+  <meta charset="UTF-8">
+  <title>NGCoin</title>
+
+  <!-- Telegram SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Monetag SDK -->
+  <script src="//libtl.com/sdk.js" data-zone="10677338" data-sdk="show_10677338"></script>
+
+  <style>
+    body {
+      background: #0f172a;
+      color: white;
+      text-align: center;
+      font-family: Arial;
+    }
+
+    #coin {
+      font-size: 40px;
+      margin: 20px;
+    }
+
+    .tap-btn {
+      width: 150px;
+      height: 150px;
+      border-radius: 50%;
+      background: gold;
+      font-size: 22px;
+      border: none;
+    }
+
+    button {
+      padding: 10px 20px;
+      margin: 10px;
+    }
+  </style>
 </head>
 <body>
 
-<h1>NGCoin Mini App</h1>
-<p>Coins: <span id="coins">0</span></p>
-<p>Balance: ₦<span id="balance">0</span></p>
+<h2>NGCoin Mini Game</h2>
 
-<button id="tapBtn">Tap to Mine</button>
-<button id="rewardBtn">Watch Reward Ad</button>
-<button id="withdrawBtn">Withdraw</button>
+<div id="coin">0</div>
 
-<div id="progressContainer"><div id="progressBar"></div></div>
+<button class="tap-btn" onclick="tap()">TAP</button>
+<br>
+<button onclick="watchAd()">Watch Rewarded Ad</button>
 
 <script>
-const coinsEl = document.getElementById("coins");
-const balanceEl = document.getElementById("balance");
-const tapBtn = document.getElementById("tapBtn");
-const rewardBtn = document.getElementById("rewardBtn");
-const withdrawBtn = document.getElementById("withdrawBtn");
-const progressContainer = document.getElementById("progressContainer");
-const progressBar = document.getElementById("progressBar");
+  const tg = window.Telegram.WebApp;
+  tg.expand();
 
-// Replace with actual logged-in user's telegram_id
-const TELEGRAM_ID = "user_telegram_id";
+  const user = tg.initDataUnsafe?.user;
 
-// Helper Functions
-function updateCoins(coins, balance) { coinsEl.textContent = coins; balanceEl.textContent = balance.toFixed(2); }
-function showConfetti() { console.log("🎉 Confetti!"); }
+  if (!user) {
+    alert("Open inside Telegram!");
+  }
 
-// TAP SYSTEM
-tapBtn.addEventListener("click", async () => {
-  try {
-    const resp = await fetch("/api/tap", {
-      method: "POST",
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ telegram_id: TELEGRAM_ID })
-    });
-    const data = await resp.json();
-    if(data.success) {
-      updateCoins(data.coins, data.balance);
-      alert(`✅ Coins: ${data.coins}\nProjected Daily: ${data.projection.daily}`);
-    } else alert("⚠️ " + (data.error || "Tap failed"));
-  } catch(e) { console.error(e); }
-});
+  const telegram_id = user?.id;
 
-// REWARDED INTERSTITIAL
-rewardBtn.addEventListener("click", () => {
-  progressContainer.style.display = "block";
-  progressBar.style.width = "0%";
+  const coinEl = document.getElementById("coin");
 
-  let progress = 0;
-  const step = 0.5;
-  const intervalTime = 25;
-  const interval = setInterval(() => {
-    progress += step;
-    if(progress > 100) progress = 100;
-    progressBar.style.width = progress + "%";
-  }, intervalTime);
-
-  show_10677338().then(async () => {
-    clearInterval(interval);
-    progressBar.style.width = "100%";
-    setTimeout(() => { progressContainer.style.display = "none"; }, 300);
-
+  async function tap(ad=false){
     const res = await fetch("/api/tap", {
-      method: "POST",
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ telegram_id: TELEGRAM_ID })
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ telegram_id, adWatched: ad })
     });
+
     const data = await res.json();
-    if(data.success) updateCoins(data.coins + 50, data.balance);
-    showConfetti();
-    alert("✅ Reward ad completed! Coins added.");
-  }).catch(e => {
-    clearInterval(interval);
-    progressContainer.style.display = "none";
-    console.error("Ad error:", e);
-    alert("⚠️ Ad failed or skipped.");
-  });
-});
 
-// IN-APP INTERSTITIAL
-async function showInAppInterstitial() {
-  try {
-    await show_10677338({
-      type: 'inApp',
-      inAppSettings: { frequency: 2, capping: 0.1, interval: 30, timeout: 5, everyPage: false }
+    if(data.success){
+      coinEl.innerText = data.coins;
+    } else {
+      alert(data.error);
+    }
+  }
+
+  function watchAd(){
+    show_10677338().then(()=>{
+      tap(true);
     });
-    showConfetti();
-    alert("✅ In-App ad shown!");
-  } catch(e) { console.error("In-App ad error:", e); }
-}
-
-// WITHDRAW
-withdrawBtn.addEventListener("click", async () => {
-  try {
-    const res = await fetch("/api/withdraw", {
-      method: "POST",
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ telegram_id: TELEGRAM_ID })
-    });
-    const data = await res.json();
-    if(data.error) alert("⚠️ " + data.error);
-    else alert("💰 " + data.message);
-  } catch(e) { console.error(e); }
-});
-
-// AUTO REFRESH USER BALANCE
-async function refreshBalance() {
-  try {
-    const resp = await fetch("/api/leaderboard");
-    const data = await resp.json();
-    const me = data.find(u => u.username === TELEGRAM_ID);
-    if(me) updateCoins(me.coins, me.balance || 0);
-  } catch(e) { console.error(e); }
-}
-setInterval(refreshBalance, 15000); // every 15 sec
+  }
 </script>
+
 </body>
-  </html>
+</html>
