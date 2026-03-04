@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NGCoin Mini App Dashboard</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>NGCoin Mini App</h1>
+    <p>Live dashboard connected to WebSocket & Telegram</p>
+  </header>
+
+  <!-- Dashboard Cards -->
+  <div class="grid">
+    <div class="card">
+      <h2>Total Users</h2>
+      <p class="value" id="totalUsers">0</p>
+    </div>
+    <div class="card">
+      <h2>Active Users</h2>
+      <p class="value" id="activeUsers">0</p>
+    </div>
+    <div class="card">
+      <h2>Banned Users</h2>
+      <p class="value" id="bannedUsers">0</p>
+    </div>
+    <div class="card">
+      <h2>Total Coins</h2>
+      <p class="value" id="totalCoins">0</p>
+    </div>
+    <div class="card">
+      <h2>Total Tokens</h2>
+      <p class="value" id="totalTokens">0</p>
+    </div>
+    <div class="card">
+      <h2>Total Airdrops</h2>
+      <p class="value" id="totalAirdrops">0</p>
+    </div>
+    <div class="card">
+      <h2>Total Presale Tokens</h2>
+      <p class="value" id="totalPresaleTokens">0</p>
+    </div>
+    <div class="card">
+      <h2>VIP Users</h2>
+      <p class="value" id="vipUsers">0</p>
+    </div>
+    <div class="card">
+      <h2>Average Mining Level</h2>
+      <p class="value" id="avgMiningLevel">0</p>
+    </div>
+    <div class="card">
+      <h2>Pending Withdrawals</h2>
+      <p class="value" id="pendingWithdrawals">0</p>
+    </div>
+    <div class="card">
+      <h2>Processed Withdrawals</h2>
+      <p class="value" id="processedWithdrawals">0</p>
+    </div>
+    <div class="card">
+      <h2>Total Profit</h2>
+      <p class="value" id="totalProfit">0</p>
+    </div>
+  </div>
+
+  <!-- Analytics Charts -->
+  <h2 style="margin-top:2rem; color: var(--primary); text-align:center;">Analytics Charts</h2>
+  <div class="grid">
+    <div class="card">
+      <h2>Coins Over Time</h2>
+      <canvas id="coinsChart" height="150"></canvas>
+    </div>
+    <div class="card">
+      <h2>Tokens Over Time</h2>
+      <canvas id="tokensChart" height="150"></canvas>
+    </div>
+    <div class="card">
+      <h2>Average Mining Level</h2>
+      <canvas id="miningChart" height="150"></canvas>
+    </div>
+  </div>
+
+  <footer>
+    &copy; 2026 NGCoin Mini App
+  </footer>
+</div>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="js/app.js"></script>
+</body>
+  </html>
