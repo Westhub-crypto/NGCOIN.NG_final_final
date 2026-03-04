@@ -2,366 +2,85 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>NGCoin Ultimate Crypto</title>
-
+<title>NGCoin</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
 <style>
 body{
   margin:0;
-  background:linear-gradient(180deg,#0f172a,#020617);
-  font-family:Arial;
+  background:#0f172a;
   color:white;
   text-align:center;
+  font-family:Arial;
 }
-h1{margin-top:10px;}
-#balance{font-size:24px;margin-top:10px;}
-#rankBadge{color:gold;font-weight:bold;}
-
 #coin{
   width:200px;
   margin-top:20px;
   cursor:pointer;
-  transition:.1s;
 }
-#coin:active{transform:scale(.9);}
-
-#energyBar{
-  width:80%;
-  height:10px;
-  background:#1e293b;
-  margin:15px auto;
-  border-radius:10px;
-  overflow:hidden;
-}
-#energyFill{
-  height:100%;
-  background:limegreen;
-  width:100%;
-}
-
 button{
   padding:8px 14px;
-  margin:5px;
+  background:#2563eb;
   border:none;
   border-radius:6px;
-  background:#2563eb;
   color:white;
-  font-weight:bold;
-}
-
-.section{display:none;margin-top:15px;}
-.spinWheel{
-  width:150px;
-  height:150px;
-  border-radius:50%;
-  border:6px solid gold;
-  margin:10px auto;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-weight:bold;
-  background:#111;
-}
-
-#cryptoDashboard{
-  display:none;
-  background:#1e293b;
-  padding:15px;
-  margin:10px auto;
-  width:90%;
-  border-radius:10px;
-  text-align:left;
-}
-#adminDashboard{
-  display:none;
-  background:#111;
-  padding:15px;
-  margin:10px auto;
-  width:95%;
-  border-radius:10px;
-  text-align:left;
+  margin:5px;
 }
 </style>
 </head>
 <body>
 
-<h1>NGCoin 💎 Crypto Edition</h1>
+<h2>NGCoin Tap To Earn</h2>
 
-<div id="balance">Coins: 0 | Token: 0.0000</div>
-<div id="rankBadge"></div>
-
-<div id="energyBar">
-  <div id="energyFill"></div>
-</div>
+<div id="balance">Coins: 0</div>
+<div id="energy">Energy: 1000</div>
 
 <img src="https://i.imgur.com/9z3sF6K.png" id="coin">
-
-<div>
-  <button onclick="showLeaderboard()">Leaderboard</button>
-  <button onclick="spin()">Spin</button>
-  <button onclick="dailyStreak()">Daily</button>
-  <button onclick="showTasks()">Tasks</button>
-  <button onclick="shareGame()">Share</button>
-  <button onclick="connectTON()">Connect TON</button>
-  <button onclick="buyVIP()">VIP</button>
-  <button onclick="showCryptoDashboard()">Crypto Dashboard</button>
-  <button onclick="showAdminDashboard()">Admin Dashboard</button>
-</div>
-
-<div id="leaderboard" class="section"></div>
-<div id="tasks" class="section"></div>
-<div id="cryptoDashboard" class="section"></div>
-<div id="adminDashboard" class="section"></div>
-<div class="spinWheel" id="wheel">SPIN</div>
 
 <script>
 const tg = window.Telegram.WebApp;
 tg.expand();
 
-let telegram_id = tg.initDataUnsafe.user?.id;
-let username = tg.initDataUnsafe.user?.username;
+const telegram_id = tg.initDataUnsafe.user?.id;
+const username = tg.initDataUnsafe.user?.username;
 
-let coins=0;
-let energy=1000;
-let mining_level=1;
-let vip=false;
-let tonConnectUI;
-let cryptoBalance=0;
-let airdrops=[];
-let wsAdmin;
+let coins = 0;
+let energy = 1000;
 
-// ---------------- WEBSOCKET ----------------
-const ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);
-
-ws.onopen=()=>ws.send(JSON.stringify({telegram_id}));
-
-ws.onmessage=(event)=>{
-  const data=JSON.parse(event.data);
-
-  if(data.coins!==undefined){
-    coins=data.coins;
-    energy=data.energy;
-    cryptoBalance=data.cryptoBalance||cryptoBalance;
-    airdrops=data.airdrops||airdrops;
-    updateUI();
-  }
-
-  if(data.leaderboard){
-    renderLeaderboard(data.leaderboard);
-  }
-};
-
-// ---------------- UI UPDATES ----------------
-function updateUI(){
-  document.getElementById("balance").innerText="Coins: "+coins+" | Token: "+cryptoBalance.toFixed(4);
-  document.getElementById("energyFill").style.width=(energy/10)+"%";
-  updateRank();
-}
-
-function updateRank(){
-  let badge="Bronze 🥉";
-  if(coins>50000) badge="Silver 🥈";
-  if(coins>200000) badge="Gold 🥇";
-  if(coins>1000000) badge="Diamond 💎";
-  document.getElementById("rankBadge").innerText=badge;
-}
-
-// ---------------- REGISTER ----------------
 async function register(){
- const res=await fetch("/api/register",{
+ const res = await fetch("/api/user/auth",{
   method:"POST",
   headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({telegram_id,username})
+  body:JSON.stringify({telegram_id, username})
  });
- const data=await res.json();
- coins=data.coins;
- energy=data.energy;
- mining_level=data.mining_level;
- cryptoBalance=data.cryptoBalance||0;
- airdrops=data.airdrops||[];
+ const data = await res.json();
+ coins = data.coins;
+ energy = data.energy;
  updateUI();
 }
 
-// ---------------- TAP ----------------
-document.getElementById("coin").addEventListener("click",async()=>{
- const res=await fetch("/api/tap",{
+async function mine(){
+ const res = await fetch("/api/user/mine",{
   method:"POST",
   headers:{"Content-Type":"application/json"},
   body:JSON.stringify({telegram_id})
  });
- const data=await res.json();
+ const data = await res.json();
  if(!data.error){
-  coins=data.coins;
-  energy=data.energy;
-  cryptoBalance=data.cryptoBalance||cryptoBalance;
+  coins = data.coins;
+  energy = data.energy;
   updateUI();
  }
-});
-
-// ---------------- LEADERBOARD ----------------
-async function showLeaderboard(){
- const res=await fetch("/api/leaderboard");
- const data=await res.json();
- renderLeaderboard(data);
 }
 
-function renderLeaderboard(data){
- const board=document.getElementById("leaderboard");
- board.innerHTML="<h3>Top Players</h3>";
- data.forEach((u,i)=>{
-  board.innerHTML+=`<div>${i+1}. ${u.username||"Anon"} - ${u.coins} | Token: ${u.cryptoBalance?.toFixed(4)||0}</div>`;
- });
- board.style.display="block";
+function updateUI(){
+ document.getElementById("balance").innerText = "Coins: " + coins;
+ document.getElementById("energy").innerText = "Energy: " + energy;
 }
 
-// ---------------- SHARE ----------------
-function shareGame(){
- const url=`https://t.me/share/url?url=https://t.me/YOUR_BOT_USERNAME`;
- window.open(url);
- fetch("/api/share-bonus",{method:"POST",
- headers:{"Content-Type":"application/json"},
- body:JSON.stringify({telegram_id})});
-}
+document.getElementById("coin").addEventListener("click", mine);
 
-// ---------------- SPIN ----------------
-async function spin(){
- const reward=Math.floor(Math.random()*5000)+500;
- coins+=reward;
- updateUI();
- alert("You won "+reward+" coins!");
-}
-
-// ---------------- DAILY ----------------
-async function dailyStreak(){
- const res=await fetch("/api/streak",{
-  method:"POST",
-  headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({telegram_id})
- });
- alert("Daily reward claimed!");
-}
-
-// ---------------- TASKS ----------------
-async function showTasks(){
- const res=await fetch("/api/tasks");
- const data=await res.json();
- const box=document.getElementById("tasks");
- box.innerHTML="<h3>Tasks</h3>";
- data.forEach(task=>{
-  box.innerHTML+=`
-   <div>
-     ${task.title} - ${task.reward}
-     <button onclick="completeTask(${task.id},${task.reward})">Do</button>
-   </div>`;
- });
- box.style.display="block";
-}
-
-async function completeTask(id,reward){
- coins+=reward;
- updateUI();
- alert("Task completed +"+reward);
-}
-
-// ---------------- TON CONNECT ----------------
-function connectTON(){
- tonConnectUI=new TON_CONNECT_UI.TonConnectUI({
-  manifestUrl:"https://yourdomain.com/tonconnect-manifest.json"
- });
- tonConnectUI.openModal();
-}
-
-// ---------------- VIP BOOST ----------------
-async function buyVIP(){
- await fetch("/api/buy-vip",{
-  method:"POST",
-  headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({telegram_id})
- });
- vip=true;
- alert("VIP Activated 🚀 Mining Boost Enabled");
-}
-
-// ---------------- CRYPTO DASHBOARD ----------------
-function showCryptoDashboard(){
- const dash=document.getElementById("cryptoDashboard");
- dash.innerHTML=`
- <h3>Crypto Dashboard</h3>
- <p>Token Balance: ${cryptoBalance.toFixed(4)}</p>
- <p>Airdrops Claimed: ${airdrops.length}</p>
- <button onclick="claimAirdrop()">Claim Airdrop</button>
- <button onclick="participatePresale()">Participate Presale</button>
- <button onclick="autoPayout()">Auto Payout</button>
- `;
- dash.style.display="block";
-}
-
-// Airdrop Farming
-async function claimAirdrop(){
- const res=await fetch("/api/airdrop",{method:"POST",
- headers:{"Content-Type":"application/json"},
- body:JSON.stringify({telegram_id})});
- const data=await res.json();
- cryptoBalance+=data.reward;
- airdrops.push(data.id);
- updateUI();
- alert(`Airdrop +${data.reward} Tokens`);
-}
-
-// Presale
-async function participatePresale(){
- const amount=prompt("Enter amount to invest in presale:");
- if(!amount) return;
- const res=await fetch("/api/presale",{method:"POST",
- headers:{"Content-Type":"application/json"},
- body:JSON.stringify({telegram_id,amount:parseFloat(amount)})});
- const data=await res.json();
- cryptoBalance+=data.tokens;
- updateUI();
- alert(`Purchased ${data.tokens} Tokens`);
-}
-
-// Auto Payout
-async function autoPayout(){
- const res=await fetch("/api/auto-payout",{method:"POST",
- headers:{"Content-Type":"application/json"},
- body:JSON.stringify({telegram_id})});
- const data=await res.json();
- alert(`Payout processed: ${data.amount} Tokens`);
-}
-
-// ---------------- ADMIN DASHBOARD ----------------
-function showAdminDashboard(){
-  const dash=document.getElementById("adminDashboard");
-  dash.innerHTML="<h3>Admin Profit Dashboard</h3><p>Loading...</p>";
-  dash.style.display="block";
-
-  // Connect WebSocket as admin to receive live updates
-  wsAdmin=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host);
-  wsAdmin.onopen=()=>wsAdmin.send(JSON.stringify({admin:true}));
-  wsAdmin.onmessage=(event)=>{
-    const data=JSON.parse(event.data);
-    dash.innerHTML=`
-      <h3>Admin Profit Dashboard</h3>
-      <p>Total Users: ${data.totalUsers}</p>
-      <p>Active Users: ${data.activeUsers}</p>
-      <p>Banned Users: ${data.bannedUsers}</p>
-      <p>Total Coins: ${data.totalCoins}</p>
-      <p>Total Tokens: ${data.totalTokens}</p>
-      <p>Total Airdrops: ${data.totalAirdrops}</p>
-      <p>Total Presale Tokens: ${data.totalPresaleTokens}</p>
-      <p>VIP Users: ${data.vipUsers}</p>
-      <p>Avg Mining Level: ${data.avgMiningLevel}</p>
-      <p>Pending Withdrawals: ${data.pendingWithdrawals}</p>
-      <p>Processed Withdrawals: ${data.processedWithdrawals}</p>
-      <p>Total Profit: ${data.totalProfit}</p>
-    `;
-  };
-}
-
-// ---------------- REGISTER INIT ----------------
 register();
 </script>
+
 </body>
-  </html>
+</html>
