@@ -10,17 +10,17 @@ const http = require("http");
 const WebSocket = require("ws");
 const Redis = require("redis");
 
+// ================= INIT =================
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// ================= CONFIG =================
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || "SUPER_SECRET_KEY_CHANGE_THIS";
+const JWT_SECRET = process.env.JWT_SECRET || "CHANGE_THIS_NOW";
 
 // ================= RATE LIMIT =================
 app.use("/api/", rateLimit({
@@ -34,155 +34,85 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ================= REDIS (Safe Initialization) =================
+// ================= REDIS =================
 let redis;
 if (process.env.REDIS_URL) {
   redis = Redis.createClient({ url: process.env.REDIS_URL });
-  redis.on("error", (err) => console.warn("Redis error:", err.message));
-  redis.connect()
-    .then(() => console.log("✅ Redis connected"))
-    .catch((err) => console.warn("Redis failed to connect:", err.message));
-} else {
-  console.log("⚠️ No REDIS_URL provided. Skipping Redis connection");
-}
-
-async function setRedis(key, value, expireSeconds = 60) {
-  if (!redis) return;
-  try {
-    if (expireSeconds) await redis.set(key, value, { EX: expireSeconds });
-    else await redis.set(key, value);
-  } catch (err) {
-    console.warn("Redis set failed:", err.message);
-  }
-}
-
-async function getRedis(key) {
-  if (!redis) return null;
-  try { return await redis.get(key); }
-  catch (err) { console.warn("Redis get failed:", err.message); return null; }
+  redis.connect().catch(() => {});
 }
 
 // ================= WEBSOCKET =================
-const clients = new Map();
-const adminClients = new Set();
+const userSockets = new Map();
+const adminSockets = new Set();
 
 wss.on("connection", (ws) => {
   ws.on("message", (msg) => {
     try {
       const data = JSON.parse(msg);
-      if (data.telegram_id) clients.set(data.telegram_id, ws);
-      if (data.admin === true) adminClients.add(ws);
-    } catch (e) { console.warn("WS parse error:", e.message); }
+      if (data.type === "user") userSockets.set(data.telegram_id, ws);
+      if (data.type === "admin") adminSockets.add(ws);
+    } catch {}
   });
 
   ws.on("close", () => {
-    clients.forEach((value, key) => { if (value === ws) clients.delete(key); });
-    adminClients.delete(ws);
+    userSockets.forEach((value, key) => {
+      if (value === ws) userSockets.delete(key);
+    });
+    adminSockets.delete(ws);
   });
 });
 
-function sendLiveUpdate(telegram_id, payload) {
-  const ws = clients.get(telegram_id);
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+function sendUserUpdate(id, payload) {
+  const ws = userSockets.get(id);
+  if (ws && ws.readyState === WebSocket.OPEN)
+    ws.send(JSON.stringify(payload));
 }
 
-async function broadcastAdminUpdate() {
-  try {
-    // safe queries
-    const [
-      totalUsersRes, activeUsersRes, bannedUsersRes, totalCoinsRes, totalTokensRes,
-      airdropsRes, presaleRes, vipRes, avgMiningRes,
-      pendingWithdrawalsRes, processedWithdrawalsRes
-    ] = await Promise.all([
-      pool.query('SELECT COUNT(*) FROM users'),
-      pool.query('SELECT COUNT(*) FROM users WHERE "energy">0'),
-      pool.query('SELECT COUNT(*) FROM users WHERE banned=true'),
-      pool.query('SELECT SUM(coins) FROM users'),
-      pool.query('SELECT SUM("cryptoBalance") FROM users'),
-      pool.query('SELECT COUNT(*) FROM airdrops'),
-      pool.query('SELECT SUM(tokens) FROM presales'),
-      pool.query('SELECT COUNT(*) FROM users WHERE vip=true'),
-      pool.query('SELECT AVG(mining_level) FROM users'),
-      pool.query("SELECT COUNT(*) FROM withdrawals WHERE status='pending'"),
-      pool.query("SELECT COUNT(*) FROM withdrawals WHERE status='processed'")
-    ]);
-
-    const totalProfit = (parseInt(totalCoinsRes.rows[0].sum||0)/1000) + parseFloat(totalTokensRes.rows[0].sum||0);
-
-    const payload = {
-      totalUsers: parseInt(totalUsersRes.rows[0].count),
-      activeUsers: parseInt(activeUsersRes.rows[0].count),
-      bannedUsers: parseInt(bannedUsersRes.rows[0].count),
-      totalCoins: parseInt(totalCoinsRes.rows[0].sum || 0),
-      totalTokens: parseFloat(totalTokensRes.rows[0].sum || 0),
-      totalAirdrops: parseInt(airdropsRes.rows[0].count || 0),
-      totalPresaleTokens: parseFloat(presaleRes.rows[0].sum || 0),
-      vipUsers: parseInt(vipRes.rows[0].count || 0),
-      avgMiningLevel: parseFloat(avgMiningRes.rows[0].avg || 0),
-      pendingWithdrawals: parseInt(pendingWithdrawalsRes.rows[0].count || 0),
-      processedWithdrawals: parseInt(processedWithdrawalsRes.rows[0].count || 0),
-      totalProfit
-    };
-
-    adminClients.forEach(ws => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
-    });
-
-  } catch(err) {
-    console.error("Admin broadcast error:", err.message);
-  }
-}
-setInterval(broadcastAdminUpdate, 10000);
-
-// ================= INIT TABLES =================
+// ================= DATABASE INIT =================
 async function initDB() {
-  // users table
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       telegram_id BIGINT UNIQUE NOT NULL,
       username TEXT,
       coins BIGINT DEFAULT 0,
-      "cryptoBalance" FLOAT DEFAULT 0,
-      "energy" INT DEFAULT 1000,
+      energy INT DEFAULT 1000,
       mining_level INT DEFAULT 1,
-      vip BOOLEAN DEFAULT false,
+      last_mine TIMESTAMP DEFAULT NOW(),
       referral_code TEXT UNIQUE,
       referred_by TEXT,
+      vip BOOLEAN DEFAULT false,
       banned BOOLEAN DEFAULT false,
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
 
-  // alter existing table if missing columns
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "energy" INT DEFAULT 1000;`);
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS "cryptoBalance" FLOAT DEFAULT 0;`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS upgrades (
+      id SERIAL PRIMARY KEY,
+      level INT,
+      cost BIGINT,
+      power INT
+    );
+  `);
 
-  // other tables
   await pool.query(`
     CREATE TABLE IF NOT EXISTS withdrawals (
       id SERIAL PRIMARY KEY,
       telegram_id BIGINT,
-      amount BIGINT,
+      amount FLOAT,
+      wallet TEXT,
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS airdrops (
+    CREATE TABLE IF NOT EXISTS revenue (
       id SERIAL PRIMARY KEY,
-      telegram_id BIGINT,
+      source TEXT,
       amount FLOAT,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS presales (
-      id SERIAL PRIMARY KEY,
-      telegram_id BIGINT,
-      tokens FLOAT,
       created_at TIMESTAMP DEFAULT NOW()
     );
   `);
@@ -191,93 +121,211 @@ async function initDB() {
     CREATE TABLE IF NOT EXISTS admins (
       id SERIAL PRIMARY KEY,
       username TEXT UNIQUE,
-      password TEXT
+      password TEXT,
+      role TEXT DEFAULT 'superadmin'
     );
   `);
 
-  const adminCheck = await pool.query("SELECT * FROM admins WHERE username=$1", ["westpablo01"]);
-  if (!adminCheck.rows.length) {
-    const hashed = await bcrypt.hash("@Westpablo1", 10);
-    await pool.query("INSERT INTO admins (username,password) VALUES ($1,$2)", ["westpablo01", hashed]);
+  // Default upgrade levels
+  const checkUpgrade = await pool.query("SELECT * FROM upgrades");
+  if (!checkUpgrade.rows.length) {
+    for (let i = 1; i <= 10; i++) {
+      await pool.query(
+        "INSERT INTO upgrades(level,cost,power) VALUES($1,$2,$3)",
+        [i, i * 500, i * 10]
+      );
+    }
   }
+
+  console.log("✅ DB READY");
 }
 initDB();
 
-// ===================== ADMIN AUTH =====================
-function verifyAdmin(req,res,next){
+// ================= ENERGY AUTO REGEN =================
+setInterval(async () => {
+  await pool.query(`
+    UPDATE users
+    SET energy = LEAST(energy + 5, 1000)
+  `);
+}, 60000);
+
+// ================= ANTI-CHEAT =================
+async function canMine(user) {
+  const now = Date.now();
+  const lastMine = new Date(user.last_mine).getTime();
+  if (now - lastMine < 1000) return false; // 1 sec cooldown
+  return true;
+}
+
+// ================= USER AUTH =================
+app.post("/api/user/auth", async (req, res) => {
+  const { telegram_id, username, referral } = req.body;
+
+  let user = await pool.query(
+    "SELECT * FROM users WHERE telegram_id=$1",
+    [telegram_id]
+  );
+
+  if (!user.rows.length) {
+
+    const referralCode = "REF" + telegram_id;
+
+    await pool.query(`
+      INSERT INTO users(telegram_id,username,referral_code,referred_by)
+      VALUES($1,$2,$3,$4)
+    `, [telegram_id, username, referralCode, referral || null]);
+
+    // Referral reward
+    if (referral) {
+      await pool.query(`
+        UPDATE users SET coins = coins + 200
+        WHERE referral_code=$1
+      `, [referral]);
+    }
+
+    user = await pool.query(
+      "SELECT * FROM users WHERE telegram_id=$1",
+      [telegram_id]
+    );
+  }
+
+  res.json(user.rows[0]);
+});
+
+// ================= TAP TO EARN =================
+app.post("/api/user/mine", async (req, res) => {
+
+  const { telegram_id } = req.body;
+
+  const userRes = await pool.query(
+    "SELECT * FROM users WHERE telegram_id=$1",
+    [telegram_id]
+  );
+
+  const user = userRes.rows[0];
+  if (!user) return res.json({ error: "User not found" });
+  if (user.energy <= 0) return res.json({ error: "No energy" });
+
+  const allowed = await canMine(user);
+  if (!allowed) return res.json({ error: "Too fast (anti-cheat)" });
+
+  const power = user.mining_level * 10;
+  const earned = power;
+
+  await pool.query(`
+    UPDATE users
+    SET coins=coins+$1,
+        energy=energy-10,
+        last_mine=NOW()
+    WHERE telegram_id=$2
+  `, [earned, telegram_id]);
+
+  sendUserUpdate(telegram_id, { earned });
+
+  res.json({ success: true, earned });
+});
+
+// ================= UPGRADE SHOP =================
+app.post("/api/user/upgrade", async (req, res) => {
+  const { telegram_id } = req.body;
+
+  const userRes = await pool.query(
+    "SELECT * FROM users WHERE telegram_id=$1",
+    [telegram_id]
+  );
+  const user = userRes.rows[0];
+
+  const nextLevel = user.mining_level + 1;
+
+  const upgrade = await pool.query(
+    "SELECT * FROM upgrades WHERE level=$1",
+    [nextLevel]
+  );
+
+  if (!upgrade.rows.length)
+    return res.json({ error: "Max level reached" });
+
+  const cost = upgrade.rows[0].cost;
+
+  if (user.coins < cost)
+    return res.json({ error: "Not enough coins" });
+
+  await pool.query(`
+    UPDATE users
+    SET coins=coins-$1,
+        mining_level=mining_level+1
+    WHERE telegram_id=$2
+  `, [cost, telegram_id]);
+
+  res.json({ success: true });
+});
+
+// ================= WITHDRAW =================
+app.post("/api/user/withdraw", async (req, res) => {
+  const { telegram_id, amount, wallet } = req.body;
+
+  await pool.query(`
+    INSERT INTO withdrawals(telegram_id,amount,wallet)
+    VALUES($1,$2,$3)
+  `, [telegram_id, amount, wallet]);
+
+  res.json({ success: true });
+});
+
+// ================= ADMIN AUTH =================
+function verifyAdmin(req, res, next) {
   const token = req.headers.authorization;
-  if(!token) return res.status(401).json({error:"Unauthorized"});
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.admin = decoded;
+    req.admin = jwt.verify(token, JWT_SECRET);
     next();
   } catch {
-    res.status(401).json({error:"Invalid token"});
+    res.status(401).json({ error: "Invalid token" });
   }
 }
 
-app.post("/admin/login", async (req,res)=>{
-  const { username,password } = req.body;
-  const admin = await pool.query("SELECT * FROM admins WHERE username=$1", [username]);
-  if(!admin.rows.length) return res.json({error:"Admin not found"});
-  const valid = await bcrypt.compare(password, admin.rows[0].password);
-  if(!valid) return res.json({error:"Wrong password"});
-  const token = jwt.sign({id:admin.rows[0].id}, JWT_SECRET, {expiresIn:"7d"});
-  res.json({success:true, token});
+// ================= ADMIN APPROVE WITHDRAW =================
+app.post("/admin/withdraw/:id/approve", verifyAdmin, async (req, res) => {
+
+  const id = req.params.id;
+
+  await pool.query(`
+    UPDATE withdrawals
+    SET status='processed'
+    WHERE id=$1
+  `, [id]);
+
+  res.json({ success: true });
 });
 
-// ===================== ADMIN PROFIT ANALYTICS =====================
-app.get("/admin/profit", verifyAdmin, async (req,res)=>{
-  try{
-    const [
-      totalUsersRes, activeUsersRes, bannedUsersRes, totalCoinsRes, totalTokensRes,
-      airdropsRes, presaleRes, vipRes, avgMiningRes,
-      pendingWithdrawalsRes, processedWithdrawalsRes
-    ] = await Promise.all([
-      pool.query('SELECT COUNT(*) FROM users'),
-      pool.query('SELECT COUNT(*) FROM users WHERE "energy">0'),
-      pool.query('SELECT COUNT(*) FROM users WHERE banned=true'),
-      pool.query('SELECT SUM(coins) FROM users'),
-      pool.query('SELECT SUM("cryptoBalance") FROM users'),
-      pool.query('SELECT COUNT(*) FROM airdrops'),
-      pool.query('SELECT SUM(tokens) FROM presales'),
-      pool.query('SELECT COUNT(*) FROM users WHERE vip=true'),
-      pool.query('SELECT AVG(mining_level) FROM users'),
-      pool.query("SELECT COUNT(*) FROM withdrawals WHERE status='pending'"),
-      pool.query("SELECT COUNT(*) FROM withdrawals WHERE status='processed'")
-    ]);
+// ================= REVENUE GRAPH =================
+app.get("/admin/revenue-graph", verifyAdmin, async (req, res) => {
 
-    const totalProfit = (parseInt(totalCoinsRes.rows[0].sum||0)/1000) + parseFloat(totalTokensRes.rows[0].sum||0);
+  const daily = await pool.query(`
+    SELECT DATE(created_at) as day,
+           SUM(amount) as total
+    FROM revenue
+    GROUP BY day
+    ORDER BY day DESC
+    LIMIT 7
+  `);
 
-    res.json({
-      totalUsers: parseInt(totalUsersRes.rows[0].count),
-      activeUsers: parseInt(activeUsersRes.rows[0].count),
-      bannedUsers: parseInt(bannedUsersRes.rows[0].count),
-      totalCoins: parseInt(totalCoinsRes.rows[0].sum || 0),
-      totalTokens: parseFloat(totalTokensRes.rows[0].sum || 0),
-      totalAirdrops: parseInt(airdropsRes.rows[0].count || 0),
-      totalPresaleTokens: parseFloat(presaleRes.rows[0].sum || 0),
-      vipUsers: parseInt(vipRes.rows[0].count || 0),
-      avgMiningLevel: parseFloat(avgMiningRes.rows[0].avg || 0),
-      pendingWithdrawals: parseInt(pendingWithdrawalsRes.rows[0].count || 0),
-      processedWithdrawals: parseInt(processedWithdrawalsRes.rows[0].count || 0),
-      totalProfit
-    });
-  }catch(err){
-    res.status(500).json({error:err.message});
-  }
-});
+  const weekly = await pool.query(`
+    SELECT DATE_TRUNC('week', created_at) as week,
+           SUM(amount) as total
+    FROM revenue
+    GROUP BY week
+    ORDER BY week DESC
+    LIMIT 4
+  `);
 
-// ================= SERVE INDEX.HTML =================
-app.get("/", (req,res)=>{
-  const indexPath = path.join(__dirname, "public", "index.html");
-  res.sendFile(indexPath, (err)=>{
-    if(err){
-      console.error("Failed to serve index.html:", err.message);
-      res.status(500).send("Server error");
-    }
+  res.json({
+    daily: daily.rows,
+    weekly: weekly.rows
   });
 });
 
-// ================= SERVER START =================
-server.listen(PORT, ()=>console.log("🚀 ULTRA PRODUCTION SERVER RUNNING ON", PORT));
+// ================= START =================
+server.listen(PORT, () =>
+  console.log("🚀 NOTCOIN-STYLE GAME SERVER RUNNING ON", PORT)
+);
