@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>NGCoin Admin Dashboard</title>
+<style>
+body{margin:0;font-family:Arial;background:#0f172a;color:white;}
+header{padding:10px;background:#111;text-align:center;font-size:24px;font-weight:bold;}
+.dashboard{display:flex;flex-wrap:wrap;justify-content:center;margin:20px;}
+.card{
+  background:#1e293b;
+  margin:10px;
+  padding:20px;
+  border-radius:10px;
+  flex:1 1 300px;
+  min-width:280px;
+  text-align:center;
+}
+.card h3{margin-bottom:15px;}
+button{
+  padding:8px 14px;
+  margin-top:10px;
+  border:none;
+  border-radius:6px;
+  background:#2563eb;
+  color:white;
+  font-weight:bold;
+  cursor:pointer;
+}
+table{
+  width:100%;
+  margin-top:10px;
+  border-collapse:collapse;
+}
+th,td{
+  padding:8px;
+  border-bottom:1px solid #333;
+  text-align:center;
+}
+</style>
+</head>
+<body>
+
+<header>NGCoin Admin Dashboard 📊</header>
+
+<div style="text-align:center;margin-top:15px;">
+<input type="password" id="adminPass" placeholder="Enter Admin Password">
+<button onclick="loginAdmin()">Login</button>
+</div>
+
+<div class="dashboard" id="dashboard" style="display:none;">
+
+  <div class="card">
+    <h3>Total Users</h3>
+    <p id="totalUsers">0</p>
+    <p id="activeUsers">Active: 0</p>
+    <p id="bannedUsers">Banned: 0</p>
+  </div>
+
+  <div class="card">
+    <h3>Coins & Tokens</h3>
+    <p id="totalCoins">0</p>
+    <p id="totalTokens">0</p>
+  </div>
+
+  <div class="card">
+    <h3>Airdrops & Presales</h3>
+    <p id="airdrops">0</p>
+    <p id="presaleTokens">0</p>
+  </div>
+
+  <div class="card">
+    <h3>VIP & Mining</h3>
+    <p id="vipUsers">VIP Users: 0</p>
+    <p id="avgMiningLevel">Avg Mining Level: 0</p>
+  </div>
+
+  <div class="card">
+    <h3>Withdrawals</h3>
+    <p id="pendingWithdrawals">Pending: 0</p>
+    <p id="processedWithdrawals">Processed: 0</p>
+  </div>
+
+  <div class="card">
+    <h3>Profit Analytics</h3>
+    <p id="totalProfit">0 Tokens</p>
+    <button onclick="refreshDashboard()">Refresh</button>
+  </div>
+
+</div>
+
+<script>
+let token="";
+
+async function loginAdmin(){
+  const pass=document.getElementById("adminPass").value;
+  const res=await fetch("/admin/login",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({username:"westpablo01",password:pass})
+  });
+  const data=await res.json();
+  if(data.success){
+    token=data.token;
+    document.getElementById("dashboard").style.display="flex";
+    alert("Admin Logged In ✅");
+    refreshDashboard();
+  }else{
+    alert(data.error);
+  }
+}
+
+async function refreshDashboard(){
+  if(!token) return alert("Not authorized");
+
+  const res=await fetch("/admin/profit",{method:"GET",headers:{"Authorization":token}});
+  const data=await res.json();
+
+  document.getElementById("totalUsers").innerText=data.totalUsers;
+  document.getElementById("activeUsers").innerText="Active: "+data.activeUsers;
+  document.getElementById("bannedUsers").innerText="Banned: "+data.bannedUsers;
+
+  document.getElementById("totalCoins").innerText=data.totalCoins;
+  document.getElementById("totalTokens").innerText=data.totalTokens.toFixed(4);
+
+  document.getElementById("airdrops").innerText=data.totalAirdrops;
+  document.getElementById("presaleTokens").innerText=data.totalPresaleTokens.toFixed(4);
+
+  document.getElementById("vipUsers").innerText="VIP Users: "+data.vipUsers;
+  document.getElementById("avgMiningLevel").innerText="Avg Mining Level: "+data.avgMiningLevel.toFixed(2);
+
+  document.getElementById("pendingWithdrawals").innerText="Pending: "+data.pendingWithdrawals;
+  document.getElementById("processedWithdrawals").innerText="Processed: "+data.processedWithdrawals;
+
+  document.getElementById("totalProfit").innerText=data.totalProfit.toFixed(4)+" Tokens";
+}
+</script>
+</body>
+</html>
