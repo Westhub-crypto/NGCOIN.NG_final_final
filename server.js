@@ -36,16 +36,13 @@ const pool = new Pool({
 
 // ================= REDIS (Safe Initialization) =================
 let redis;
-
 if (process.env.REDIS_URL) {
   try {
     redis = Redis.createClient({ url: process.env.REDIS_URL });
-    redis.on("error", (err) => {
-      console.warn("Redis connection error:", err.message);
-    });
+    redis.on("error", (err) => console.warn("Redis error:", err.message));
     redis.connect()
       .then(() => console.log("✅ Redis connected"))
-      .catch((err) => console.warn("Redis failed to connect:", err.message));
+      .catch((err) => console.warn("Redis failed:", err.message));
   } catch (err) {
     console.warn("Redis setup failed:", err.message);
   }
@@ -53,25 +50,18 @@ if (process.env.REDIS_URL) {
   console.log("⚠️ No REDIS_URL provided. Skipping Redis connection");
 }
 
-// Safe Redis functions
 async function setRedis(key, value, expireSeconds = 60) {
   if (!redis) return;
   try {
     if (expireSeconds) await redis.set(key, value, { EX: expireSeconds });
     else await redis.set(key, value);
-  } catch (err) {
-    console.warn("Redis set failed:", err.message);
-  }
+  } catch (err) { console.warn("Redis set failed:", err.message); }
 }
 
 async function getRedis(key) {
   if (!redis) return null;
-  try {
-    return await redis.get(key);
-  } catch (err) {
-    console.warn("Redis get failed:", err.message);
-    return null;
-  }
+  try { return await redis.get(key); } 
+  catch (err) { console.warn("Redis get failed:", err.message); return null; }
 }
 
 // ================= WEBSOCKET =================
@@ -84,7 +74,6 @@ wss.on("connection", (ws) => {
     if (data.telegram_id) clients.set(data.telegram_id, ws);
     if (data.admin === true) adminClients.add(ws);
   });
-
   ws.on("close", () => {
     clients.forEach((value, key) => { if (value === ws) clients.delete(key); });
     if (adminClients.has(ws)) adminClients.delete(ws);
@@ -103,15 +92,15 @@ async function broadcastAdminUpdate() {
       airdropsRes, presaleRes, vipRes, avgMiningRes,
       pendingWithdrawalsRes, processedWithdrawalsRes
     ] = await Promise.all([
-      pool.query("SELECT COUNT(*) FROM users"),
-      pool.query("SELECT COUNT(*) FROM users WHERE energy>0"),
-      pool.query("SELECT COUNT(*) FROM users WHERE banned=true"),
-      pool.query("SELECT SUM(coins) FROM users"),
-      pool.query("SELECT SUM(cryptoBalance) FROM users"),
-      pool.query("SELECT COUNT(*) FROM airdrops"),
-      pool.query("SELECT SUM(tokens) FROM presales"),
-      pool.query("SELECT COUNT(*) FROM users WHERE vip=true"),
-      pool.query("SELECT AVG(mining_level) FROM users"),
+      pool.query('SELECT COUNT(*) FROM users'),
+      pool.query('SELECT COUNT(*) FROM users WHERE "energy">0'),
+      pool.query('SELECT COUNT(*) FROM users WHERE banned=true'),
+      pool.query('SELECT SUM(coins) FROM users'),
+      pool.query('SELECT SUM("cryptoBalance") FROM users'),
+      pool.query('SELECT COUNT(*) FROM airdrops'),
+      pool.query('SELECT SUM(tokens) FROM presales'),
+      pool.query('SELECT COUNT(*) FROM users WHERE vip=true'),
+      pool.query('SELECT AVG(mining_level) FROM users'),
       pool.query("SELECT COUNT(*) FROM withdrawals WHERE status='pending'"),
       pool.query("SELECT COUNT(*) FROM withdrawals WHERE status='processed'")
     ]);
@@ -122,14 +111,14 @@ async function broadcastAdminUpdate() {
       totalUsers: parseInt(totalUsersRes.rows[0].count),
       activeUsers: parseInt(activeUsersRes.rows[0].count),
       bannedUsers: parseInt(bannedUsersRes.rows[0].count),
-      totalCoins: parseInt(totalCoinsRes.rows[0].sum || 0),
-      totalTokens: parseFloat(totalTokensRes.rows[0].sum || 0),
-      totalAirdrops: parseInt(airdropsRes.rows[0].count || 0),
-      totalPresaleTokens: parseFloat(presaleRes.rows[0].sum || 0),
-      vipUsers: parseInt(vipRes.rows[0].count || 0),
-      avgMiningLevel: parseFloat(avgMiningRes.rows[0].avg || 0),
-      pendingWithdrawals: parseInt(pendingWithdrawalsRes.rows[0].count || 0),
-      processedWithdrawals: parseInt(processedWithdrawalsRes.rows[0].count || 0),
+      totalCoins: parseInt(totalCoinsRes.rows[0].sum||0),
+      totalTokens: parseFloat(totalTokensRes.rows[0].sum||0),
+      totalAirdrops: parseInt(airdropsRes.rows[0].count||0),
+      totalPresaleTokens: parseFloat(presaleRes.rows[0].sum||0),
+      vipUsers: parseInt(vipRes.rows[0].count||0),
+      avgMiningLevel: parseFloat(avgMiningRes.rows[0].avg||0),
+      pendingWithdrawals: parseInt(pendingWithdrawalsRes.rows[0].count||0),
+      processedWithdrawals: parseInt(processedWithdrawalsRes.rows[0].count||0),
       totalProfit
     };
 
@@ -150,8 +139,8 @@ async function initDB() {
       telegram_id BIGINT UNIQUE NOT NULL,
       username TEXT,
       coins BIGINT DEFAULT 0,
-      cryptoBalance FLOAT DEFAULT 0,
-      energy INT DEFAULT 1000,
+      "cryptoBalance" FLOAT DEFAULT 0,
+      "energy" INT DEFAULT 1000,
       mining_level INT DEFAULT 1,
       vip BOOLEAN DEFAULT false,
       referral_code TEXT UNIQUE,
@@ -197,6 +186,7 @@ async function initDB() {
     );
   `);
 
+  // Create default admin if missing
   const adminCheck = await pool.query("SELECT * FROM admins WHERE username=$1", ["westpablo01"]);
   if (adminCheck.rows.length === 0) {
     const hashed = await bcrypt.hash("@Westpablo1", 10);
@@ -228,21 +218,21 @@ app.post("/admin/login", async (req,res)=>{
 
 // ===================== ADMIN PROFIT ANALYTICS =====================
 app.get("/admin/profit", verifyAdmin, async (req,res)=>{
-  try{
+  try {
     const [
       totalUsersRes, activeUsersRes, bannedUsersRes, totalCoinsRes, totalTokensRes,
       airdropsRes, presaleRes, vipRes, avgMiningRes,
       pendingWithdrawalsRes, processedWithdrawalsRes
     ] = await Promise.all([
-      pool.query("SELECT COUNT(*) FROM users"),
-      pool.query("SELECT COUNT(*) FROM users WHERE energy>0"),
-      pool.query("SELECT COUNT(*) FROM users WHERE banned=true"),
-      pool.query("SELECT SUM(coins) FROM users"),
-      pool.query("SELECT SUM(cryptoBalance) FROM users"),
-      pool.query("SELECT COUNT(*) FROM airdrops"),
-      pool.query("SELECT SUM(tokens) FROM presales"),
-      pool.query("SELECT COUNT(*) FROM users WHERE vip=true"),
-      pool.query("SELECT AVG(mining_level) FROM users"),
+      pool.query('SELECT COUNT(*) FROM users'),
+      pool.query('SELECT COUNT(*) FROM users WHERE "energy">0'),
+      pool.query('SELECT COUNT(*) FROM users WHERE banned=true'),
+      pool.query('SELECT SUM(coins) FROM users'),
+      pool.query('SELECT SUM("cryptoBalance") FROM users'),
+      pool.query('SELECT COUNT(*) FROM airdrops'),
+      pool.query('SELECT SUM(tokens) FROM presales'),
+      pool.query('SELECT COUNT(*) FROM users WHERE vip=true'),
+      pool.query('SELECT AVG(mining_level) FROM users'),
       pool.query("SELECT COUNT(*) FROM withdrawals WHERE status='pending'"),
       pool.query("SELECT COUNT(*) FROM withdrawals WHERE status='processed'")
     ]);
@@ -253,19 +243,24 @@ app.get("/admin/profit", verifyAdmin, async (req,res)=>{
       totalUsers: parseInt(totalUsersRes.rows[0].count),
       activeUsers: parseInt(activeUsersRes.rows[0].count),
       bannedUsers: parseInt(bannedUsersRes.rows[0].count),
-      totalCoins: parseInt(totalCoinsRes.rows[0].sum || 0),
-      totalTokens: parseFloat(totalTokensRes.rows[0].sum || 0),
-      totalAirdrops: parseInt(airdropsRes.rows[0].count || 0),
-      totalPresaleTokens: parseFloat(presaleRes.rows[0].sum || 0),
-      vipUsers: parseInt(vipRes.rows[0].count || 0),
-      avgMiningLevel: parseFloat(avgMiningRes.rows[0].avg || 0),
-      pendingWithdrawals: parseInt(pendingWithdrawalsRes.rows[0].count || 0),
-      processedWithdrawals: parseInt(processedWithdrawalsRes.rows[0].count || 0),
+      totalCoins: parseInt(totalCoinsRes.rows[0].sum||0),
+      totalTokens: parseFloat(totalTokensRes.rows[0].sum||0),
+      totalAirdrops: parseInt(airdropsRes.rows[0].count||0),
+      totalPresaleTokens: parseFloat(presaleRes.rows[0].sum||0),
+      vipUsers: parseInt(vipRes.rows[0].count||0),
+      avgMiningLevel: parseFloat(avgMiningRes.rows[0].avg||0),
+      pendingWithdrawals: parseInt(pendingWithdrawalsRes.rows[0].count||0),
+      processedWithdrawals: parseInt(processedWithdrawalsRes.rows[0].count||0),
       totalProfit
     });
-  }catch(err){
-    res.status(500).json({error:err.message});
+  } catch(err){
+    res.status(500).json({error: err.message});
   }
+});
+
+// ================= SERVE INDEX FOR TELEGRAM =================
+app.get("/", (req,res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
 // ================= SERVER START =================
