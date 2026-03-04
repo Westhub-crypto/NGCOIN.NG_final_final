@@ -14,11 +14,12 @@
     body {
       background: #0f172a;
       color: white;
-      text-align: center;
       font-family: Arial;
+      text-align: center;
+      padding: 20px;
     }
 
-    #coin {
+    .coin {
       font-size: 40px;
       margin: 20px;
     }
@@ -28,8 +29,9 @@
       height: 150px;
       border-radius: 50%;
       background: gold;
-      font-size: 22px;
       border: none;
+      font-size: 22px;
+      font-weight: bold;
     }
 
     button {
@@ -40,9 +42,9 @@
 </head>
 <body>
 
-<h2>NGCoin Mini Game</h2>
+<h2>NGCoin Mini App</h2>
 
-<div id="coin">0</div>
+<div class="coin" id="coins">0</div>
 
 <button class="tap-btn" onclick="tap()">TAP</button>
 <br>
@@ -55,31 +57,31 @@
   const user = tg.initDataUnsafe?.user;
 
   if (!user) {
-    alert("Open inside Telegram!");
+    document.body.innerHTML = "<h3>Please open inside Telegram</h3>";
   }
 
   const telegram_id = user?.id;
 
-  const coinEl = document.getElementById("coin");
+  const coinEl = document.getElementById("coins");
 
-  async function tap(ad=false){
+  async function tap(ad = false) {
     const res = await fetch("/api/tap", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ telegram_id, adWatched: ad })
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ telegram_id })
     });
 
     const data = await res.json();
 
-    if(data.success){
+    if (data.success) {
       coinEl.innerText = data.coins;
     } else {
       alert(data.error);
     }
   }
 
-  function watchAd(){
-    show_10677338().then(()=>{
+  function watchAd() {
+    show_10677338().then(() => {
       tap(true);
     });
   }
